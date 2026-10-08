@@ -18,7 +18,45 @@ local nextId = 0
 -- Keep the native item lifecycle/abort callback, without binding a replacement
 -- ActionFn. The normal menu still supplies its parameter refs and key handlers.
 local Lifecycle = react.RegisterRecipe("XinRailLoopLifecycle", function(params)
-  if params.isActive then controllers[params.definition.resName] = params end
+  local fileName = params.definition.resName
+  if params.isActive then
+    controllers[fileName] = params
+    -- Native construction tools register input handlers in their menu recipe.
+    -- SimpleInputActions exists in old declarations but is not a runtime export.
+    local function current()
+      local session = activeSessions[fileName]
+      if controllers[fileName] and session and session.live then return session end
+    end
+    local repeatable = { constructRaise = true, constructLower = true, constructOpt1 = true, constructOpt2 = true }
+    local bindings = {}
+    for id in pairs(repeatable) do bindings[id] = true end
+    local session = current()
+    local native = session and session.native
+    for id in pairs(native and native.inputActions or {}) do bindings[id] = true end
+    bindings.IA_APPLY = nil
+    for id in pairs(bindings) do
+      local actionId = id
+      react.useInputAction(actionId, react.iaHandler(function()
+        local active = current()
+        if active and active.native and active.native.inputActionsHandler then
+          active.native.inputActionsHandler(actionId)
+        end
+      end, function()
+        local active = current()
+        return active ~= nil and active.native ~= nil and active.native.inputActionsHandler ~= nil
+      end, native and native.inputActionPrompts and native.inputActionPrompts[actionId],
+        repeatable[actionId], native and native.inputActionActive and native.inputActionActive[actionId]))
+    end
+    react.useInputAction("IA_APPLY", react.iaHandler(function()
+      local active = current()
+      if active and active.apply then active.apply() end
+    end, function()
+      local active = current()
+      return active ~= nil and not active.busy and active.allowed and active.apply ~= nil
+    end))
+  elseif controllers[fileName] then
+    controllers[fileName] = nil
+  end
   react.onUnmount(function()
     if controllers[params.definition.resName] == params then controllers[params.definition.resName] = nil end
   end)
@@ -37,6 +75,7 @@ local Action = react.RegisterRecipe("XinRailLoopTerrainPlacement", function(para
   local message = react.useState("")
   local network = react.useRef({}):get()
   activeSessions[params.fileName] = session
+  session.native = params.native
 
   local function pose()
     if not api.gui.mouse.hasTerrainPosition() then return nil end
@@ -135,23 +174,13 @@ local Action = react.RegisterRecipe("XinRailLoopTerrainPlacement", function(para
     end
     return true
   end
+  session.apply = apply
 
   react.onUnmount(function()
     session:close()
     if activeSessions[params.fileName] == session then activeSessions[params.fileName] = nil end
   end)
-  local native = params.native
-  local inputActions = {}
-  for key, value in pairs(native.inputActions or {}) do inputActions[key] = value end
-  inputActions.IA_APPLY = "build"
   local children = {
-    builtin.SimpleInputActions {
-      inputActions = inputActions,
-      inputActionsHandler = function(id)
-        if id == "IA_APPLY" then apply()
-        elseif inputs:get().native.inputActionsHandler then inputs:get().native.inputActionsHandler(id) end
-      end,
-    },
     builtin.Selector {
       filter = function() return false end, stopOnMenuBack = true,
       onProcessMouseEvent = function(event)
@@ -186,7 +215,9 @@ local Action = react.RegisterRecipe("XinRailLoopTerrainPlacement", function(para
   if message:old() ~= "" then
     children[#children + 1] = builtin.ActionTooltip { recipe = Tooltip, param = { text = message:old() } }
   end
-  return builtin.FloatingLayout { children = children }
+  -- React supports returning an action-node array directly. No visual layout
+  -- should sit between the native descriptor and its selector/preview nodes.
+  return children
 end)
 
 local getDefinitions = constructionUtil.getConstructionDefinitions
