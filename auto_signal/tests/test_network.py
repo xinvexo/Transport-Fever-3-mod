@@ -2,7 +2,7 @@ import unittest
 from collections import defaultdict
 from pathlib import Path
 
-from lupa import LuaRuntime
+from lupa.lua52 import LuaRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]

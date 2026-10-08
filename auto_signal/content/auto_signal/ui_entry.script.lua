@@ -14,7 +14,12 @@ constructionUtil.getConstructionDefinitions = function(...)
          if param.key == "asEnabled" then enabled = true end
          if param.key == "asMinimumSpacing" then spacing = param end
       end
-      if enabled and spacing and type(spacing.formatValueFn) == "function" then
+      if enabled and spacing and type(spacing.formatValueFn) == "function"
+         and not spacingFormatters[spacing.formatValueFn] then
+         -- Native controls can share formatters (Lua 5.2 also caches closures).
+         -- Tag a private wrapper so unrelated controls keep the native builder.
+         local source = { format = spacing.formatValueFn }
+         spacing.formatValueFn = function(...) return source.format(...) end
          spacingFormatters[spacing.formatValueFn] = true
       end
    end

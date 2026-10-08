@@ -1,0 +1,20 @@
+{
+  "name": "Smooth Rail Loop",
+  "summary": "A two-point return loop mode in the native track menu, reusing its height, bend and bridge/tunnel controls.",
+  "description": "两点动态铁路回环，本地开发版 r3.2。原生轨道菜单模式栏第三个图标进入，在两条已有轨道各选一点，移动鼠标调整长度和方向。复用原高度、弯曲和桥隧选项，新轨道使用当前菜单选择的轨型。中段所在轨道段需不带信号或路标。已修正 Lua 5.2 角度函数不兼容导致选点后无法生成回环的问题，240 组几何测试和192组跨版本测试通过；引擎预览和实际施工仍待用户验证。",
+  "tags": [
+    "Script Mod"
+  ],
+  "authors": [
+    {
+      "name": "xin",
+      "role": "CREATOR"
+    }
+  ],
+  "localization": {
+    "zh_CN": {
+      "name": "圆润铁路回环",
+      "summary": "选两点动态生成回环，可调长度、高架和隧道。"
+    }
+  }
+}

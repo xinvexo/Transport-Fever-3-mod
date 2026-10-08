@@ -4,7 +4,7 @@ from pathlib import Path
 import random
 import unittest
 
-from lupa import LuaRuntime
+from lupa.lua52 import LuaRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]

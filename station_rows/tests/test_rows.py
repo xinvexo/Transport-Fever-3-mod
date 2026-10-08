@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from lupa import LuaRuntime, lua_type
+from lupa.lua52 import LuaRuntime, lua_type
 
 
 ROOT = Path(__file__).resolve().parents[1]

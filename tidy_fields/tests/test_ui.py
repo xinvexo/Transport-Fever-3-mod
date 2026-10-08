@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from lupa import LuaRuntime
+from lupa.lua52 import LuaRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,8 +52,21 @@ class TidyFieldsUiTests(unittest.TestCase):
             }
             function ug_require(name) return assert(modules[name], name) end
             log = {warning = function() end}
+            local ninePatches = setmetatable({}, {__mode = 'k'})
             api = {
-                gui = {StyleSheet = {new = function() return {} end}},
+                gui = {
+                    NinePatch = {new = function()
+                        local patch = {}; ninePatches[patch] = true; return patch
+                    end},
+                    StyleSheet = {new = function()
+                        return setmetatable({}, {__newindex = function(style, key, value)
+                            if key == 'backgroundImage1' or key == 'borderImage' then
+                                assert(ninePatches[value], 'Expected a native NinePatch')
+                            end
+                            rawset(style, key, value)
+                        end})
+                    end},
+                },
                 type = {
                     Vec2f = {new = function(x, y) return {x = x, y = y} end},
                     Vec4f = {new = function(x, y, z, w) return {x = x, y = y, z = z, w = w} end},

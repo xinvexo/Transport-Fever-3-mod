@@ -1,6 +1,6 @@
 {
   "modId": "xin_tidy_fields_1",
-  "revision": 15,
+  "revision": 16,
   "severityAdd": "None",
   "severityRemove": "Warning",
   "dependencies": [],

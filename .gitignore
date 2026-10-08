@@ -1,0 +1,28 @@
+# Generated distributions and archives stay local.
+dist/
+build/
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+# Python development environment and caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Operating-system metadata.
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local diagnostics and generated reports.
+*.log
+*.dmp
+test-results/

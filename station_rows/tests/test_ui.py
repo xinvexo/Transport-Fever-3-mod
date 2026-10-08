@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from lupa import LuaRuntime
+from lupa.lua52 import LuaRuntime
 
 
 CONTENT = Path(__file__).resolve().parents[1] / "content/station_rows"

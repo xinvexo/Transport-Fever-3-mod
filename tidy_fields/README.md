@@ -35,6 +35,8 @@ Transport Fever 3 模组，支持原版作物农场、牲畜养殖场、棉花�
 Lua模拟测试覆盖产业生成上限、布局、道路避让、原版生产计算、地块数量保留、方向选择和重复整理。模拟测试不代替游戏内验证；当前版本的实际画面尚需确认。
 
 ```sh
-/Users/xin/autosignal/.venv/bin/python -m unittest discover -s tests -v
-python3 tools/package_mod.py --install '/Users/xin/Library/Application Support/Steam/userdata/428472936/3493540/local/mods'
+python -X utf8 -B -m unittest discover -s tests -v
+python tools/package_mod.py --install '/path/to/game/mods'
 ```
+
+Windows 环境、统一测试入口及 `TF3_GAME_DIR` 配置见仓库根目录 README。修订 16 使用原生 `NinePatch` 对象创建方向按钮，修复打开产业界面时的类型错误。打包产物仅供本地安装，不入库。

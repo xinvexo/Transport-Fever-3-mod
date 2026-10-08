@@ -8,15 +8,16 @@ empty render scene while the actual construction/script loading chain runs.
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 import unittest
 from zipfile import ZipFile
 
-from lupa import LuaRuntime
+from lupa.lua52 import LuaRuntime
 
 
-GAME_DIR = Path.home() / "Library/Application Support/Steam/steamapps/common/Transport Fever 3"
+GAME_DIR = Path(os.environ.get("TF3_GAME_DIR", str(Path.home() / "Library/Application Support/Steam/steamapps/common/Transport Fever 3")))
 MOD_DIR = Path(__file__).resolve().parents[1]
 
 PRELUDE = r"""
@@ -80,6 +81,8 @@ end
 class IndustryPotentialTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not (GAME_DIR / "base/content/industries/industryutil.lua").is_file():
+            raise unittest.SkipTest("local TF3 game files unavailable; set TF3_GAME_DIR")
         cls.lua = LuaRuntime(unpack_returned_tuples=True)
         cls.lua.execute(PRELUDE)
         cls.env = cls.lua.globals()

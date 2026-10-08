@@ -28,14 +28,16 @@ local function directionStyle(index)
   local horizontal = index == 1 and { 0, 9, 21, 21 }
     or index == #directions and { 9, 9, 21, 30 } or { 9, 9, 21, 21 }
   local edge = index == 1 and "left" or index == #directions and "right" or "middle"
-  style.backgroundImage1 = {
-    fileName = "::/gui/builtin/button/default_surface.tga",
-    horizontal = horizontal, vertical = { 0, 9, 21, 30 },
-  }
-  style.borderImage = {
-    fileName = "::/gui/builtin/button/default_contour_" .. edge .. ".tga",
-    horizontal = horizontal, vertical = { 0, 9, 21, 30 },
-  }
+  local background = api.gui.NinePatch.new()
+  background.fileName = "::/gui/builtin/button/default_surface.tga"
+  background.horizontal = horizontal
+  background.vertical = { 0, 9, 21, 30 }
+  style.backgroundImage1 = background
+  local border = api.gui.NinePatch.new()
+  border.fileName = "::/gui/builtin/button/default_contour_" .. edge .. ".tga"
+  border.horizontal = horizontal
+  border.vertical = { 0, 9, 21, 30 }
+  style.borderImage = border
   return style
 end
 
