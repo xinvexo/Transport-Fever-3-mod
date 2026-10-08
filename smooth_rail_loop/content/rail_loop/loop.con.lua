@@ -21,7 +21,7 @@ function data()
       previewIcon = "loop_preview.tga",
     },
     availability = { yearFrom = 1900, yearTo = 0 },
-    -- Retained for existing saves; the menu now exposes the dynamic tool.
+    -- Retained for existing saves; the new prefabs have separate resources.
     menuCategory = { categories = {} },
     heightAdjustable = true,
     configureLayerScript = {

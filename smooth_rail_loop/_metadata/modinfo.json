@@ -1,7 +1,7 @@
 {
-  "name": "Smooth Rail Loop",
-  "summary": "A two-point return loop mode in the native track menu, reusing its height, bend and bridge/tunnel controls.",
-  "description": "在轨道菜单中悬停查看落点，单击固定起点，移到另一条轨道即可预览回环。固定终点后移动鼠标调整长度和方向，复用原高度、弯曲和桥隧选项。右键或 Esc 逐步撤销终点、起点，再退出回环模式。中段选点所在轨道段需不带信号或路标。",
+  "name": "Rail Return Loops",
+  "summary": "Raised and underground railway return-loop prefabs in the native Rail Constructions menu.",
+  "description": "在“铁路 → 铁路构造”中选择高架回环或地下回环，使用原版建造预览、旋转和升降操作整体放置，再将两端接入双线主轨。支持原版轨道类型和接触网。",
   "tags": [
     "Script Mod"
   ],
@@ -13,8 +13,8 @@
   ],
   "localization": {
     "zh_CN": {
-      "name": "圆润铁路回环",
-      "summary": "选两点动态生成回环，可调长度、高架和隧道。"
+      "name": "铁路回环",
+      "summary": "高架与地下两种铁路回环预制件。"
     }
   }
 }
