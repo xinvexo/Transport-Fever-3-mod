@@ -26,7 +26,7 @@ class PrefabGeometryTests(unittest.TestCase):
         self.geometry = self.lua.execute((ROOT / "content/rail_loop/prefab_geometry.lua").read_text(encoding="utf-8"))
 
     def test_native_curvature_grade_continuity_and_ground_connections(self):
-        for kind, elevation in (("raised", 8), ("lowered", -12)):
+        for kind, elevation in (("raised", 16), ("lowered", -12)):
             with self.subTest(kind=kind):
                 segments, info = self.geometry.generate(kind)
                 previous = None
@@ -50,10 +50,36 @@ class PrefabGeometryTests(unittest.TestCase):
                 np.testing.assert_allclose(first/np.linalg.norm(first), [0, 1, 0], atol=1e-8)
                 np.testing.assert_allclose(last/np.linalg.norm(last), [0, -1, 0], atol=1e-8)
                 self.assertAlmostEqual(float(all_points[:, 2].max() if elevation > 0 else all_points[:, 2].min()), elevation)
-                self.assertLessEqual(float(np.ptp(all_points[:, 0])), 261)
-                self.assertLessEqual(float(np.ptp(all_points[:, 1])), 407 if elevation > 0 else 502)
+                self.assertLessEqual(float(np.ptp(all_points[:, 0])), 141)
+                self.assertLessEqual(float(np.ptp(all_points[:, 1])), 186)
+                self.assertLessEqual(info.depth, 211)
                 self.assertEqual(info.spacing, 5)
                 self.assertEqual(info.elevation, elevation)
+
+    def test_level_turnouts_and_clearance_for_a_future_center_mainline(self):
+        for kind in ("raised", "lowered"):
+            segments, info = self.geometry.generate(kind)
+            crossings = {-2.5: [], 2.5: []}
+            for segment in segments.values():
+                points, _, _, _ = samples(segment)
+                beginning_of_grade = (abs(points[:, 2]) > .001) & (abs(points[:, 2]) < 1)
+                if beginning_of_grade.any():
+                    self.assertGreater(float(np.min(abs(points[beginning_of_grade, 0]) - 2.5)), 6)
+                for x in crossings:
+                    indices = np.where((points[:-1, 0] - x) * (points[1:, 0] - x) < 0)[0]
+                    for index in indices:
+                        a, b = points[index:index + 2]
+                        fraction = (x - a[0]) / (b[0] - a[0])
+                        p = a + fraction * (b - a)
+                        if p[1] > 1:
+                            crossings[x].append(p)
+                            self.assertEqual(segment.kind, 'BRIDGE' if kind == 'raised' else 'TUNNEL')
+            for points in crossings.values():
+                self.assertEqual(len(points), 1)
+                self.assertAlmostEqual(points[0][2], info.elevation, delta=.02)
+            self.assertEqual(info.mainlineStart, -25)
+            self.assertEqual(info.mainlineEnd, 25)
+            self.assertGreater(info.loopDepth - info.mainlineEnd, 160)
 
     def test_structure_regions_have_correct_height_and_only_one_kind(self):
         for kind, structure in (("raised", "BRIDGE"), ("lowered", "TUNNEL")):

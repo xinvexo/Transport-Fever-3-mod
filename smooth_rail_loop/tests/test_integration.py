@@ -163,16 +163,17 @@ class PrefabResourceTests(unittest.TestCase):
                     self.assertEqual(header[16], 32)
                     self.assertEqual(header[17] & 15, 8)
 
-    def test_complete_connected_free_track_graph_and_two_snap_ends(self):
+    def test_connected_loop_junctions_short_mainline_stubs_and_four_snap_ends(self):
         for kind, structure in (('raised', 'BRIDGE'), ('lowered', 'TUNNEL')):
             with self.subTest(kind=kind):
                 result = self.build(kind)
                 groups = list(result.edgeLists.values())
-                self.assertEqual([g.edgeType or 'NORMAL' for g in groups], ['NORMAL', structure, 'NORMAL'])
+                self.assertEqual([g.edgeType or 'NORMAL' for g in groups], ['NORMAL', structure, 'NORMAL', 'NORMAL'])
                 self.assertEqual(len(result.models), 0)
                 self.assertEqual(len(result.groundFaces), 0)
                 previous = None
                 snap_positions = []
+                adjacency, edges = {}, set()
                 for group in groups:
                     self.assertEqual(group.type, 'TRACK')
                     self.assertEqual(group.alignTerrain, group.edgeType is None)
@@ -185,11 +186,40 @@ class PrefabResourceTests(unittest.TestCase):
                         start, end = group.edges[i], group.edges[i+1]
                         p0, p1 = np.array(list(start[1].values())), np.array(list(end[1].values()))
                         t0, t1 = np.array(list(start[2].values())), np.array(list(end[2].values()))
-                        if previous is not None:
+                        if group != groups[-1] and previous is not None:
                             np.testing.assert_allclose(previous[0], p0, atol=1e-8)
                             np.testing.assert_allclose(previous[1], t0/np.linalg.norm(t0), atol=1e-8)
                         previous = p1, t1/np.linalg.norm(t1)
-                np.testing.assert_allclose(snap_positions, [[-2.5, 0, 0], [2.5, 0, 0]], atol=1e-8)
+                        a, b = tuple(np.round(p0, 7)), tuple(np.round(p1, 7))
+                        edge = tuple(sorted((a, b)))
+                        self.assertNotIn(edge, edges, 'Shared mainline edges must not be duplicated')
+                        edges.add(edge)
+                        adjacency.setdefault(a, set()).add(b)
+                        adjacency.setdefault(b, set()).add(a)
+                self.assertEqual(len(snap_positions), 4)
+                for x in (-2.5, 2.5):
+                    self.assertEqual(len(adjacency[(x, 0., 0.)]), 3, 'A real turnout joins each through track to the loop')
+                    ends = [p for p in snap_positions if p[0] == x]
+                    self.assertEqual(len(ends), 2)
+                    self.assertEqual(ends[0][1:], [-25., 0.])
+                    self.assertEqual(ends[1][1], 25)
+                    self.assertEqual(ends[1][2], 0)
+                self.assertEqual(sum(len(v) == 1 for v in adjacency.values()), 4)
+                self.assertEqual(sum(len(v) == 3 for v in adjacency.values()), 2)
+                seen, pending = set(), [next(iter(adjacency))]
+                while pending:
+                    node = pending.pop()
+                    if node not in seen:
+                        seen.add(node)
+                        pending.extend(adjacency[node] - seen)
+                self.assertEqual(seen, set(adjacency), 'Every port and branch belongs to one connected network')
+                for i in (1, 3, 5, 7):
+                    start, end = groups[-1].edges[i], groups[-1].edges[i + 1]
+                    self.assertEqual(start[1][1], end[1][1])
+                    self.assertEqual(start[1][3], 0)
+                    self.assertEqual(end[1][3], 0)
+                    self.assertEqual(start[2][1], 0)
+                    self.assertEqual(start[2][3], 0)
                 self.assertEqual(groups[1].edgeTypeName, '::/infrastructure/bridge/stone.bridge' if kind == 'raised'
                                  else '::/infrastructure/tunnel/tunnel_a.tunnel')
 

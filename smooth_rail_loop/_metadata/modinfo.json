@@ -1,7 +1,7 @@
 {
   "name": "Rail Return Loops",
   "summary": "Raised and underground railway return-loop prefabs in the native Rail Constructions menu.",
-  "description": "在“铁路 → 铁路构造”中选择高架回环或地下回环，使用原版建造预览、旋转和升降操作整体放置，再将两端接入双线主轨。支持原版轨道类型和接触网，高架回环可选择原版铁路桥型。",
+  "description": "在“铁路 → 铁路构造”中选择紧凑高架回环或地下回环，整体占地约 140×211 米。分岔口附带双线主轨短接轨段，主线走向可自行延伸或弯曲。支持原版轨道类型、接触网和整体旋转升降，高架回环可选择原版铁路桥型。",
   "tags": [
     "Script Mod"
   ],

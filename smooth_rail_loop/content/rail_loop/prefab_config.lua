@@ -6,12 +6,12 @@ local variants = {
   raised = {
     name = "高架回环", order = 6100,
     icon = "raised_loop.tga", preview = "raised_loop_preview.tga",
-    description = "中部抬升 8 米的铁路掉头回环，两端保持放置高度。先在空地放置，再连接双线主轨。",
+    description = "紧凑高架回环，中部抬升 16 米。分岔口附带双线主轨短接轨段，前后均可自行接续主线。",
   },
   lowered = {
     name = "地下回环", order = 6200,
     icon = "lowered_loop.tga", preview = "lowered_loop_preview.tga",
-    description = "中部下沉 12 米的铁路掉头回环，两端保持放置高度。先在空地放置，再连接双线主轨。",
+    description = "紧凑地下回环，中部下沉 12 米。分岔口附带双线主轨短接轨段，前后均可自行接续主线。",
   },
 }
 

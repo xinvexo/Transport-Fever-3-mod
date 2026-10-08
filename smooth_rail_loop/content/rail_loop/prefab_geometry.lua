@@ -1,139 +1,159 @@
--- Compact prefab geometry.
--- Both main-line connections stay at the placement height and 5 m apart.
+-- A compact balloon branch with short, level main-line connection stubs.
 local geometry = {}
-local pi = math.pi
-local sin, cos = math.sin, math.cos
-local FLARE_ANGLE = pi / 3
-local CIRCLE_ANGLE = 5 * pi / 3
+local pi, sin, cos = math.pi, math.sin, math.cos
+local RADIUS, SPACING = 70, 5
+local TRANSITION, FLARE_ANGLE = 4, pi / 3
+local CIRCLE_LENGTH = RADIUS * 5 * pi / 3
+local LEVEL_TURNOUT, GRADE, VERTICAL_BLEND = 30, 0.08, 20
+local CONNECTION_LENGTH = 25
 
-local function smooth(u)
-  return u ^ 3 * (10 - 15 * u + 6 * u * u)
+local function clamp(x, low, high) return math.max(low, math.min(high, x)) end
+
+local function holdLength(radius)
+  return radius * FLARE_ANGLE - TRANSITION + TRANSITION * radius / (2 * RADIUS)
 end
 
-local function smoothDerivative(u)
-  return 30 * u * u * (1 - u) * (1 - u)
+-- Linear curvature transitions join the straight main line to a constant
+-- left bend, then reverse smoothly into the clockwise return circle.
+local function heading(s, radius)
+  local hold = holdLength(radius)
+  local u = clamp(s, 0, TRANSITION)
+  local v = clamp(s - TRANSITION, 0, hold)
+  local w = clamp(s - TRANSITION - hold, 0, TRANSITION)
+  return pi / 2 + u * u / (2 * TRANSITION * radius) + v / radius
+    + w / radius - (1 / radius + 1 / RADIUS) * w * w / (2 * TRANSITION)
 end
 
--- The flare begins with zero curvature and ends with the circle's
--- clockwise curvature. This removes curvature jumps at both joins.
-local function heading(u, lambda)
-  return pi / 2 + (FLARE_ANGLE + lambda / 2) / 2 * (1 - cos(pi * u))
-    - lambda * (u ^ 3 - u ^ 4 / 2)
-end
-
-local function integrate(u, lambda, component)
-  if u == 0 then return 0 end
+local function integrate(first, last, radius, component)
+  if last <= first then return 0 end
   local n = 96
-  local step = u / n
-  local sum = component(heading(0, lambda)) + component(heading(u, lambda))
+  local step = (last - first) / n
+  local sum = component(heading(first, radius)) + component(heading(last, radius))
   for i = 1, n - 1 do
-    sum = sum + (i % 2 == 0 and 2 or 4) * component(heading(i * step, lambda))
+    sum = sum + (i % 2 == 0 and 2 or 4) * component(heading(first + i * step, radius))
   end
   return sum * step / 3
 end
 
-local function flareLength(radius, spacing)
-  local target = 0.5 - spacing / (2 * radius)
-  local low, high = 0.05, 2
-  for _ = 1, 42 do
-    local mid = (low + high) / 2
-    local width = -mid * integrate(1, mid, cos)
-    if width < target then low = mid else high = mid end
-  end
-  return radius * (low + high) / 2
+local function flareIntegral(s, radius, component)
+  local holdEnd = TRANSITION + holdLength(radius)
+  return integrate(0, math.min(s, TRANSITION), radius, component)
+    + integrate(TRANSITION, math.min(s, holdEnd), radius, component)
+    + integrate(holdEnd, s, radius, component)
 end
 
-local function heightFraction(fraction)
-  local low, high = 0, 1
-  for _ = 1, 42 do
-    local mid = (low + high) / 2
-    if smooth(mid) < fraction then low = mid else high = mid end
+local low, high = 55, RADIUS
+for _ = 1, 42 do
+  local mid = (low + high) / 2
+  local length = holdLength(mid) + 2 * TRANSITION
+  local width = -flareIntegral(length, mid, cos)
+  if width < RADIUS / 2 - SPACING / 2 then low = mid else high = mid end
+end
+local FLARE_RADIUS = (low + high) / 2
+local FLARE = holdLength(FLARE_RADIUS) + 2 * TRANSITION
+local TOTAL = 2 * FLARE + CIRCLE_LENGTH
+local CENTER_Y = flareIntegral(FLARE, FLARE_RADIUS, sin) + RADIUS * math.sqrt(3) / 2
+local DEPTH = CENTER_Y + RADIUS
+
+local function planarPoint(s)
+  if s >= TOTAL - FLARE then
+    local q = TOTAL - s
+    local angle = heading(q, FLARE_RADIUS)
+    return { SPACING / 2 - flareIntegral(q, FLARE_RADIUS, cos),
+      flareIntegral(q, FLARE_RADIUS, sin), 0 }, { cos(angle), -sin(angle), 0 }
   end
-  return (low + high) / 2
+  if s <= FLARE then
+    local angle = heading(s, FLARE_RADIUS)
+    return { -SPACING / 2 + flareIntegral(s, FLARE_RADIUS, cos),
+      flareIntegral(s, FLARE_RADIUS, sin), 0 }, { cos(angle), sin(angle), 0 }
+  end
+  local angle = 4 * pi / 3 - (s - FLARE) / RADIUS
+  return { RADIUS * cos(angle), CENTER_Y + RADIUS * sin(angle), 0 },
+    { sin(angle), -cos(angle), 0 }
+end
+
+local function ease(u) return u * u * (3 - 2 * u) end
+local function easeIntegral(u) return u ^ 3 - u ^ 4 / 2 end
+
+local function heightAt(q, height)
+  local s = q - LEVEL_TURNOUT
+  local climb = height / GRADE + VERTICAL_BLEND
+  if s <= 0 then return 0, 0 end
+  if s < VERTICAL_BLEND then
+    local u = s / VERTICAL_BLEND
+    return GRADE * VERTICAL_BLEND * easeIntegral(u), GRADE * ease(u)
+  end
+  if s <= climb - VERTICAL_BLEND then
+    return GRADE * (s - VERTICAL_BLEND / 2), GRADE
+  end
+  if s < climb then
+    local u = (climb - s) / VERTICAL_BLEND
+    return height - GRADE * VERTICAL_BLEND * easeIntegral(u), GRADE * ease(u)
+  end
+  return height, 0
 end
 
 function geometry.generate(kind)
   assert(kind == "raised" or kind == "lowered", "Unknown rail loop prefab")
-  local radius, spacing, grade = 130, 5, 0.08
-  local elevation = kind == "raised" and 8 or -12
-  local flare = flareLength(radius, spacing)
-  local lambda = flare / radius
-  -- The quintic height profile has zero slope and vertical curvature at
-  -- both ends, with a peak derivative of 1.875. Leave a small margin for
-  -- the cubic track approximation's horizontal arc length.
-  local lead = math.max(40, 1.9 * math.abs(elevation) / grade - flare)
-  lead = math.ceil(lead / 5) * 5
-  local approach = lead + flare
-  local circleLength = radius * CIRCLE_ANGLE
-  local total = 2 * approach + circleLength
-  local centerY = lead + flare * integrate(1, lambda, sin) + radius * math.sqrt(3) / 2
-
-  local function incoming(s)
-    local u = math.max(0, math.min(1, s / approach))
-    local z = elevation * smooth(u)
-    local dz = elevation * smoothDerivative(u) / approach
-    if s <= lead then return { -spacing / 2, s, z }, { 0, 1, dz } end
-    local f = math.min(1, (s - lead) / flare)
-    local angle = heading(f, lambda)
-    return {
-      -spacing / 2 + flare * integrate(f, lambda, cos),
-      lead + flare * integrate(f, lambda, sin), z,
-    }, { cos(angle), sin(angle), dz }
-  end
+  -- Leave room for the through tracks, overhead wires and bridge deck.
+  local elevation = kind == "raised" and 16 or -12
+  local height, sign = math.abs(elevation), elevation > 0 and 1 or -1
+  local climb = height / GRADE + VERTICAL_BLEND
+  assert(LEVEL_TURNOUT + climb <= TOTAL / 2, "Not enough length for the rail grade")
 
   local function point(s)
-    if s <= approach then return incoming(s) end
-    if s >= approach + circleLength then
-      local p, t = incoming(total - s)
-      return { -p[1], p[2], p[3] }, { t[1], -t[2], -t[3] }
-    end
-    local angle = 4 * pi / 3 - (s - approach) / radius
-    return { radius * cos(angle), centerY + radius * sin(angle), elevation },
-      { sin(angle), -cos(angle), 0 }
+    local p, t = planarPoint(s)
+    local z, dz = heightAt(math.min(s, TOTAL - s), height)
+    p[3] = sign * z
+    t[3] = sign * dz * (s > TOTAL / 2 and -1 or 1)
+    return p, t
   end
 
-  -- Start elevated structures after an earthwork approach; keep the
-  -- tunnel's railhead deep enough for the native railway tunnel envelope.
-  local transition
-  if elevation ~= 0 then
-    local structureHeight = elevation > 0 and 5 or 10
-    transition = approach * heightFraction(structureHeight / math.abs(elevation))
+  local structureHeight = elevation > 0 and 5 or 10
+  local first, last = LEVEL_TURNOUT, LEVEL_TURNOUT + climb
+  for _ = 1, 42 do
+    local mid = (first + last) / 2
+    if heightAt(mid, height) < structureHeight then first = mid else last = mid end
   end
-  local breaks = { 0, lead, approach, approach + circleLength, total - lead, total }
-  if transition then
-    breaks[#breaks + 1] = transition
-    breaks[#breaks + 1] = total - transition
+  local transition = (first + last) / 2
+  local breaks = { 0, TOTAL / 2, TOTAL }
+  for _, s in ipairs({ TRANSITION, FLARE - TRANSITION, FLARE, LEVEL_TURNOUT,
+      LEVEL_TURNOUT + VERTICAL_BLEND, LEVEL_TURNOUT + climb - VERTICAL_BLEND,
+      LEVEL_TURNOUT + climb, transition }) do
+    breaks[#breaks + 1], breaks[#breaks + 2] = s, TOTAL - s
   end
   table.sort(breaks)
+  -- Keep short plateau boundaries from introducing sub-metre track edges.
+  local divisions = { breaks[1] }
+  for i = 2, #breaks do
+    if breaks[i] - divisions[#divisions] > 1 then divisions[#divisions + 1] = breaks[i] end
+  end
 
   local segments = {}
-  for i = 1, #breaks - 1 do
-    local first, last = breaks[i], breaks[i + 1]
-    local inFlare = (first >= lead and last <= approach)
-      or (first >= approach + circleLength and last <= total - lead)
-    local count = math.max(1, math.ceil((last - first) / (inFlare and 12 or 20)))
-    local length = (last - first) / count
-    if length > 1e-6 then
-      for j = 0, count - 1 do
-        local s0, s1 = first + j * length, first + (j + 1) * length
-        local p0, t0 = point(s0)
-        local p1, t1 = point(s1)
-        local mid = (s0 + s1) / 2
-        local kind = "NORMAL"
-        if transition and mid > transition and mid < total - transition then
-          kind = elevation > 0 and "BRIDGE" or "TUNNEL"
-        end
-        segments[#segments + 1] = {
-          kind = kind, p0 = p0, p1 = p1,
-          t0 = { t0[1] * length, t0[2] * length, t0[3] * length },
-          t1 = { t1[1] * length, t1[2] * length, t1[3] * length },
-        }
+  for i = 1, #divisions - 1 do
+    local start, finish = divisions[i], divisions[i + 1]
+    local count = math.max(1, math.ceil((finish - start) / 12))
+    local length = (finish - start) / count
+    for j = 0, count - 1 do
+      local s0, s1 = start + j * length, start + (j + 1) * length
+      local p0, t0 = point(s0)
+      local p1, t1 = point(s1)
+      local mid = (s0 + s1) / 2
+      local segmentKind = "NORMAL"
+      if mid > transition and mid < TOTAL - transition then
+        segmentKind = elevation > 0 and "BRIDGE" or "TUNNEL"
       end
+      segments[#segments + 1] = {
+        kind = segmentKind, p0 = p0, p1 = p1,
+        t0 = { t0[1] * length, t0[2] * length, t0[3] * length },
+        t1 = { t1[1] * length, t1[2] * length, t1[3] * length },
+      }
     end
   end
-  return segments, { radius = radius, lead = lead, approach = approach,
-    length = total, width = 2 * radius, depth = centerY + radius,
-    elevation = elevation, spacing = spacing, grade = grade }
+  return segments, { radius = RADIUS, length = TOTAL, width = 2 * RADIUS,
+    depth = DEPTH + CONNECTION_LENGTH, loopDepth = DEPTH,
+    elevation = elevation, spacing = SPACING, grade = GRADE,
+    mainlineStart = -CONNECTION_LENGTH, mainlineEnd = CONNECTION_LENGTH }
 end
 
 return geometry
