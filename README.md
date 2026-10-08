@@ -12,10 +12,18 @@
 
 ## 安装
 
-需要 Python 3.10 或更高版本。在仓库根目录执行，将 `auto_signal` 换成上表中的模组目录名，路径换成游戏的本地模组父目录：
+需要 Python 3.10 或更高版本。在仓库根目录执行，路径换成游戏的本地模组父目录。
+
+安装全部模组：
 
 ```sh
-python tools/package_mod.py auto_signal --install "/path/to/game/mods"
+python tools/package_mod.py --install "/path/to/game/mods"
+```
+
+只安装指定模组，用 `--mods` 选择一个或多个：
+
+```sh
+python tools/package_mod.py --mods auto_signal tidy_fields --install "/path/to/game/mods"
 ```
 
 macOS 可将 `python` 换成 `python3`。只打包时去掉 `--install` 和路径，压缩包生成在对应模组的 `dist/` 下，可手动解压到本地模组目录。

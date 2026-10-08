@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a mod's runtime resources and optionally install it locally."""
+"""Package selected mods (all by default) and optionally install them locally."""
 
 import argparse
 import json
@@ -128,15 +128,25 @@ class ModPackage:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mod", choices=sorted(MOD_RESOURCES), help="Mod directory in this repository")
+    parser.add_argument("mods", nargs="*", metavar="MOD",
+                        help="Mod directories; the existing positional form is also supported")
+    parser.add_argument("--mods", dest="selected_mods", nargs="+", action="extend", metavar="MOD",
+                        help="Only process these mods; defaults to all: " + ", ".join(MOD_RESOURCES))
     parser.add_argument("--install", type=Path, metavar="TARGET_PARENT",
-                        help="Also install into TARGET_PARENT/<Mod ID>")
-    args = parser.parse_args(argv)
+                        help="Also install each selected mod into TARGET_PARENT/<Mod ID>")
+    args = parser.parse_intermixed_args(argv)
+    if args.mods and args.selected_mods:
+        parser.error("Use either --mods or positional mod names, not both")
+    selected = list(dict.fromkeys(args.selected_mods or args.mods or MOD_RESOURCES))
+    unknown = set(selected) - MOD_RESOURCES.keys()
+    if unknown:
+        parser.error("Unknown mod directories: " + ", ".join(sorted(unknown)))
     try:
-        mod = ModPackage(ROOT / args.mod, MOD_RESOURCES[args.mod])
-        print(f"Packaged: {mod.package()}")
-        if args.install is not None:
-            print(f"Installed: {mod.install(args.install)}")
+        for name in selected:
+            mod = ModPackage(ROOT / name, MOD_RESOURCES[name])
+            print(f"Packaged: {mod.package()}")
+            if args.install is not None:
+                print(f"Installed: {mod.install(args.install)}")
     except (OSError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")
 

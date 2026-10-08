@@ -1,15 +1,19 @@
 """Exercise packaging and replacement installs without touching the game."""
 
 import json
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from tools.package_mod import BASE_RESOURCES, MOD_RESOURCES, ROOT, ModPackage
+from tools import package_mod
 
 
 class PackageTests(unittest.TestCase):
@@ -148,6 +152,75 @@ class PackageTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("--install", result.stdout)
+
+
+class PackageCliTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="tf3-package-cli-tests-")
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.root = self.directory / "repository"
+        self.parent = self.directory / "game mods"
+        for name, resources in MOD_RESOURCES.items():
+            source = self.root / name
+            PackageTests.write(source / "mod.json", json.dumps({"modId": f"xin_{name}_1"}))
+            PackageTests.write(source / "content/script.lua", f"return '{name}'")
+            PackageTests.write(source / "_metadata/modinfo.json", "{}")
+            if "strings.json" in resources:
+                PackageTests.write(source / "strings.json", "{}")
+
+    def run_cli(self, arguments):
+        output = StringIO()
+        with patch.object(package_mod, "ROOT", self.root), redirect_stdout(output), redirect_stderr(output):
+            package_mod.main(arguments)
+        return output.getvalue()
+
+    def assert_installed(self, names):
+        self.assertEqual({path.name for path in self.parent.iterdir()}, {f"xin_{name}_1" for name in names})
+        for name in MOD_RESOURCES:
+            archive = self.root / name / "dist" / f"xin_{name}_1.zip"
+            self.assertEqual(archive.exists(), name in names)
+            if name in names:
+                self.assertEqual((self.parent / f"xin_{name}_1/content/script.lua").read_text(encoding="utf-8"),
+                                 f"return '{name}'")
+
+    def test_omitting_mod_selection_installs_all_mods(self):
+        self.run_cli(["--install", str(self.parent)])
+        self.assert_installed(set(MOD_RESOURCES))
+
+    def test_named_selection_installs_only_requested_mods(self):
+        self.run_cli(["--mods", "auto_signal", "tidy_fields", "--install", str(self.parent)])
+        self.assert_installed({"auto_signal", "tidy_fields"})
+
+    def test_existing_single_mod_command_remains_supported(self):
+        self.run_cli(["auto_signal", "--install", str(self.parent)])
+        self.assert_installed({"auto_signal"})
+
+    def test_positional_selection_can_straddle_install_option(self):
+        self.run_cli(["auto_signal", "--install", str(self.parent), "station_rows"])
+        self.assert_installed({"auto_signal", "station_rows"})
+
+    def test_repeated_selection_processes_each_mod_once(self):
+        output = self.run_cli(["--install", str(self.parent), "--mods", "auto_signal", "auto_signal",
+                               "--mods", "tidy_fields"])
+        self.assert_installed({"auto_signal", "tidy_fields"})
+        self.assertEqual(output.count("Packaged:"), 2)
+        self.assertEqual(output.count("Installed:"), 2)
+
+    def test_invalid_or_conflicting_selection_has_no_filesystem_side_effects(self):
+        for arguments in (["--mods", "auto_signal", "unknown"], ["auto_signal", "unknown"],
+                          ["auto_signal", "--mods", "tidy_fields"], ["--mods"]):
+            with self.subTest(arguments=arguments), self.assertRaises(SystemExit) as error:
+                self.run_cli([*arguments, "--install", str(self.parent)])
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse(self.parent.exists())
+            self.assertEqual(list(self.root.glob("*/dist")), [])
+
+    def test_no_arguments_packages_all_without_installing(self):
+        self.run_cli([])
+        self.assertFalse(self.parent.exists())
+        for name in MOD_RESOURCES:
+            self.assertTrue((self.root / name / "dist" / f"xin_{name}_1.zip").is_file())
 
 
 if __name__ == "__main__":
