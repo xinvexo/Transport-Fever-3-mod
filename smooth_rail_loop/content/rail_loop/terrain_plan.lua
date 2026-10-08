@@ -47,6 +47,7 @@ function M.sample(edges, matrix, terrainHeight)
       return p[3] - terrain
     end
     local length = math.sqrt(edge.t0[1]^2 + edge.t0[2]^2 + edge.t0[3]^2)
+    local epsilon = .02 / length
     local count = math.max(4, math.ceil(length / .5))
     local boundaries = { 0 }
     local previous = gap(0)
@@ -65,7 +66,9 @@ function M.sample(edges, matrix, terrainHeight)
       end
       table.sort(roots)
       for _, root in ipairs(roots) do
-        if root - boundaries[#boundaries] > 1e-7 and 1 - root > 1e-7 then
+        -- Coalesce centimetre-scale duplicate boundaries; do not impose an
+        -- undocumented one-metre minimum on real bridge/tunnel transitions.
+        if root - boundaries[#boundaries] > epsilon and 1 - root > epsilon then
           boundaries[#boundaries + 1] = root
         end
       end
@@ -78,46 +81,14 @@ function M.sample(edges, matrix, terrainHeight)
       local code = material(gap((a + b) / 2))
       pieces[#pieces + 1] = { a, b, code }
     end
-    local minimum = 1.01 / length
-    -- A tiny structural tail can stay with its adjoining ground entry; the
-    -- earthwork bounds below still reject large cuts/fills on a cliff face.
-    for i = #pieces, 1, -1 do
-      local piece = pieces[i]
-      if piece[3] ~= 1 and piece[2] - piece[1] < minimum then
-        if pieces[i - 1] and pieces[i - 1][3] == 1 then
-          pieces[i - 1][2] = piece[2]
-          table.remove(pieces, i)
-        elseif pieces[i + 1] and pieces[i + 1][3] == 1 then
-          pieces[i + 1][1] = piece[1]
-          table.remove(pieces, i)
-        end
-      end
-    end
     for i = #pieces, 2, -1 do
       if pieces[i][3] == pieces[i - 1][3] then
         pieces[i - 1][2] = pieces[i][2]
         table.remove(pieces, i)
       end
     end
-    -- Widen short ground entries INTO the adjoining structure, rather than
-    -- turning an entire long tunnel/bridge edge into deep-cut earthwork.
-    for i, piece in ipairs(pieces) do
-      if piece[3] == 1 and piece[2] - piece[1] < minimum then
-        local missing = minimum - (piece[2] - piece[1])
-        local nextPiece, previousPiece = pieces[i + 1], pieces[i - 1]
-        if nextPiece and nextPiece[2] - nextPiece[1] > minimum + missing then
-          piece[2] = piece[2] + missing
-          nextPiece[1] = piece[2]
-        elseif previousPiece and previousPiece[2] - previousPiece[1] > minimum + missing then
-          piece[1] = piece[1] - missing
-          previousPiece[2] = piece[1]
-        end
-      end
-    end
     for _, piece in ipairs(pieces) do
-      -- Do not silently excavate a cliff when an extremely short transition
-      -- cannot meet the native track/portal geometry constraints.
-      assert((piece[2] - piece[1]) * length >= 1, "地形变化过急，桥隧衔接长度不足")
+      -- Preserve exact subcurves and let the engine check their buildability.
       if piece[3] == 1 then
         local function checkEarthwork(value)
           assert(value <= BRIDGE_CLEARANCE + 2 and value >= -TUNNEL_COVER - 2,
@@ -135,6 +106,16 @@ function M.sample(edges, matrix, terrainHeight)
     plan[index] = pieces
   end
   return plan
+end
+
+-- Only for showing the design when terrain sampling fails. The caller must
+-- mark this candidate as preview-only and must never commit it to the world.
+function M.previewPlan(edges)
+  local result = {}
+  for index, edge in ipairs(edges) do
+    result[index] = { { 0, 1, edge.kind == "BRIDGE" and 2 or edge.kind == "TUNNEL" and 3 or 1 } }
+  end
+  return result
 end
 
 function M.apply(edges, plan)

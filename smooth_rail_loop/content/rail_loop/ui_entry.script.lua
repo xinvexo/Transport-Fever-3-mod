@@ -83,23 +83,42 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
     end
     if key == session.key then return end
     session:replace(key, nil)
-    local ok, proposal = pcall(function()
-      local plan = sample(matrix)
-      session.terrainPlan = plan
-      return placement.makeProposal(api, fileName, values, matrix, plan)
-    end)
+    local sampled, plan = pcall(sample, matrix)
+    local planningError
+    if not sampled then
+      planningError = tostring(plan):match("(地形变化过急[^\n]*)") or "无法读取该位置的地形，当前仅显示预览"
+      if session.lastPlanningError ~= planningError then
+        log.warning("[Rail Loop] terrain planning: " .. tostring(plan))
+      end
+      session.lastPlanningError = planningError
+      local network = networks[own[fileName]]
+      if not network then
+        preview:set(nil)
+        setMessage("无法生成回环轨道")
+        return
+      end
+      plan = terrainPlan.previewPlan(network)
+    else
+      session.lastPlanningError = nil
+    end
+    session.terrainPlan = plan
+    local ok, proposal = pcall(placement.makeProposal, api, fileName, values, matrix, plan)
     if not ok then
       preview:set(nil)
-      local detail = tostring(proposal):match("(地形变化过急[^\n]*)")
-      setMessage(detail or "无法生成回环预览，请调整放置位置")
-      log.warning("[Rail Loop] " .. tostring(proposal))
+      setMessage("无法创建施工预览，请调整放置位置")
+      log.warning("[Rail Loop] proposal creation: " .. tostring(proposal))
       return
     end
     session.proposal = proposal
     nextProposalId = nextProposalId + 1
     preview:set({ owner = session, simple = proposal, revision = session.revision,
-      id = "xin-rail-loop:" .. nextProposalId })
-    setMessage("")
+      id = "xin-rail-loop:" .. nextProposalId, planningError = planningError })
+    setMessage(planningError or "")
+    if not session.plannedLogged then
+      session.plannedLogged = true
+      log.message(string.format("[Rail Loop] proposal generated: %s; position=%.2f,%.2f,%.2f; previewOnly=%s",
+        own[fileName], matrix[13], matrix[14], matrix[15], tostring(planningError ~= nil)))
+    end
   end)
 
   local function apply()
@@ -175,6 +194,10 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
       }
       local candidate = preview:old()
       if candidate and candidate.owner == session then
+        if not session.viewerLogged then
+          session.viewerLogged = true
+          log.message("[Rail Loop] proposal viewer attached")
+        end
         children[#children + 1] = builtin.ProposalViewer {
           simpleProposal = candidate.simple,
           proposalId = candidate.id,
@@ -182,6 +205,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
           onCreateProposalData = function(data, prepared)
             if not alive() or candidate.revision ~= session.revision then return end
             local errors = {}
+            if candidate.planningError then errors[#errors + 1] = candidate.planningError end
             for _, value in ipairs(data.errorState.messages or {}) do errors[#errors + 1] = tostring(value) end
             local ok, issue = pcall(placement.checkPrepared, prepared)
             if not ok then issue = "无法检查施工预览" end
@@ -190,6 +214,11 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
             if balance and data.costs > balance then errors[#errors + 1] = _("Not Enough Money") end
             local allowed = not data.errorState.critical and #errors == 0
             if session:validated(candidate.revision, prepared, allowed) then
+              local summary = tostring(allowed) .. "; " .. table.concat(errors, " | ")
+              if session.lastCheckSummary ~= summary then
+                session.lastCheckSummary = summary
+                log.message("[Rail Loop] proposal checked: allowed=" .. summary)
+              end
               errors[#errors + 1] = _("Cost:") .. " " .. api.util.formatMoney(data.costs)
               setMessage(table.concat(errors, "\n"))
             end

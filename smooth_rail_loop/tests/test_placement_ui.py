@@ -88,7 +88,9 @@ api={type={SimpleProposal={new=obj,ConstructionEntity={new=obj}},Context={new=ob
   cmd={makeWorldBuildProposalCmd=function(proposal) return {proposal=proposal} end,
     sendCommand=function(command,callback) commands=commands+1;pending=callback end},
   util={formatMoney=function(value) return '$'..value end}}
-log={warning=function(message) lastWarning=message end}
+diagnostics={}
+log={warning=function(message) lastWarning=message end,
+     message=function(message) diagnostics[#diagnostics+1]=message end}
 _=function(s) return s end
 function instance(definition) return 'XinRailLoopMenu/'..definition.resName end
 function mount(definition,active)
@@ -293,6 +295,39 @@ class PlacementUiTests(unittest.TestCase):
           assert(find(root,'LayerConfig')[1].params.config.undergroundMode)
           preferredLayer={custom=true}
           root=render(defs[2]);assert(find(root,'LayerConfig')[1].params.config==preferredLayer)
+        ''')
+
+    def test_failed_terrain_sampling_keeps_preview_but_never_commits_fallback(self):
+        self.lua.execute('''
+          api.engine.terrain.getHeightAt=function(p)
+            if p.x==mouse.x and p.y==mouse.y then return 0 end
+            error('Terrain sample unavailable')
+          end
+          local root=render(defs[1]);step();root=render(defs[1])
+          assert(#find(root,'ProposalViewer')==1)
+          validate(root);root=render(defs[1])
+          assert(#find(root,'ProposalViewer')==1)
+          local tooltip=find(root,'ActionTooltip')[1].params
+          assert(tooltip.param.text:find('仅显示预览',1,true))
+          press();assert(commands==0)
+          api.engine.terrain.getHeightAt=function() return 0 end
+          mouse.x=mouse.x+1;step();root=render(defs[1]);validate(root)
+          press();assert(commands==1)
+          local logText=table.concat(diagnostics,'\\n')
+          assert(logText:find('proposal generated',1,true))
+          assert(logText:find('proposal viewer attached',1,true))
+          assert(logText:find('proposal checked: allowed=true',1,true))
+        ''')
+
+    def test_native_rejection_keeps_candidate_visible_and_blocks_apply(self):
+        self.lua.execute('''
+          local root=render(defs[1]);step();root=render(defs[1])
+          find(root,'ProposalViewer')[1].params.onCreateProposalData(
+            {costs=0,errorState={critical=true,messages={'碰撞'}}},nil)
+          root=render(defs[1])
+          assert(#find(root,'ProposalViewer')==1)
+          assert(find(root,'ActionTooltip')[1].params.param.text:find('碰撞',1,true))
+          press();assert(commands==0)
         ''')
 
 

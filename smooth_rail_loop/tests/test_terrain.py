@@ -71,7 +71,7 @@ class TerrainTests(unittest.TestCase):
                 p, t, radius, grade = samples(edge, 101)
                 self.assertGreater(float(radius.min()), 55)
                 self.assertLess(float(grade.max()), .085)
-                self.assertGreater(float(np.linalg.norm(p[-1] - p[0])), .98)
+                self.assertGreater(float(np.linalg.norm(p[-1] - p[0])), .009)
                 for tag, point in ((edge.tag0, p[0]), (edge.tag1, p[-1])):
                     if tag in positions:
                         np.testing.assert_allclose(positions[tag], point, atol=1e-8)
@@ -98,7 +98,7 @@ class TerrainTests(unittest.TestCase):
             plan = self.terrain.sample(edges, pose, ground)
             self.assertEqual(len(plan[1]), 2)
             self.assertEqual(plan[1][1][3], 1)
-            self.assertAlmostEqual(plan[1][1][2] * 12, 1.01, places=5)
+            self.assertAlmostEqual(plan[1][1][2] * 12, .25 / .65, places=5)
             self.assertEqual(plan[1][2][3], code)
             self.assertGreater((plan[1][2][2] - plan[1][2][1]) * 12, 10)
 
@@ -107,10 +107,25 @@ class TerrainTests(unittest.TestCase):
                                    't0': [12, 0, 0], 't1': [12, 0, 0]}, recursive=True)
         edges = self.lua.table_from([edge])
         ground = lambda x, y: -6 + 20 * max(0, 1-abs(x-1)/.8)
-        # Such a cliff cannot fit a safe >=1m portal transition; it must be
-        # rejected instead of showing a legal all-bridge construction.
-        with self.assertRaises(Exception):
-            self.terrain.sample(edges, self.terrain.pose(0, 0, 0, 0), ground)
+        plan = self.terrain.sample(edges, self.terrain.pose(0, 0, 0, 0), ground)
+        self.assertEqual({piece[3] for piece in plan[1].values()}, {1, 2, 3})
+        covering_peak = [piece for piece in plan[1].values() if piece[1] <= 1/12 <= piece[2]]
+        self.assertEqual(len(covering_peak), 1)
+        self.assertEqual(covering_peak[0][3], 3)
+
+    def test_short_transition_keeps_full_preview_plan_for_native_validation(self):
+        # Previously the 0.4m ground piece could neither be widened nor merged,
+        # so the planner threw before it could create any preview proposal.
+        edge = self.lua.table_from({'p0': [0, 0, 0], 'p1': [1.8, 0, 0],
+                                   't0': [1.8, 0, 0], 't1': [1.8, 0, 0]}, recursive=True)
+        edges = self.lua.table_from([edge])
+        plan = self.terrain.sample(edges, self.terrain.pose(0, 0, 0, 0), lambda x, y: -4.6-x)
+        self.assertEqual(len(plan[1]), 2)
+        self.assertAlmostEqual(plan[1][1][2] * 1.8, .4, places=5)
+        parts = self.terrain.apply(edges, plan)
+        self.assertEqual([part.kind for part in parts.values()], ['NORMAL', 'BRIDGE'])
+        np.testing.assert_allclose(list(parts[1].p1.values()), list(parts[2].p0.values()), atol=1e-9)
+        np.testing.assert_allclose(list(parts[2].p1.values()), [1.8, 0, 0], atol=1e-9)
 
 
 class PlacementTests(unittest.TestCase):
