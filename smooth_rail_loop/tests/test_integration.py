@@ -1,6 +1,8 @@
 """Load the real construction resources without any custom GUI objects."""
 import os
 from pathlib import Path
+import re
+import struct
 import unittest
 from zipfile import ZipFile
 
@@ -36,6 +38,7 @@ return M
 class PrefabResourceTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.globals()['_'] = lambda value: value
         self.cache = {'::/scripts/construction/param_util.tl': self.lua.execute(PARAM_UTIL)}
         def require(name):
             if name not in self.cache:
@@ -73,8 +76,11 @@ class PrefabResourceTests(unittest.TestCase):
             self.assertEqual(definition.availability.yearFrom, 0)
             self.assertTrue(definition.heightAdjustable)
             self.assertEqual(definition.undergroundView, kind == 'lowered')
-            self.assertEqual(definition.description.previewIcon, definition.description.icon)
-            self.assertEqual([p.key for p in definition.params.values()], ['trackType', 'trackType', 'catenary'])
+            self.assertEqual(definition.description.icon, kind + '_loop.tga')
+            self.assertEqual(definition.description.previewIcon, kind + '_loop_preview.tga')
+            keys = [p.key for p in definition.params.values()]
+            self.assertEqual(keys, ['trackType', 'trackType', 'catenary'] +
+                             (['bridgeType'] * 2 + ['bridgeTypeModern'] * 3 if kind == 'raised' else []))
             self.assertTrue(definition.configureHudIconsScript.fileName.endswith('@configureTrackConstructionHudIconsFn'))
         self.assertFalse(list(CONTENT.glob('dynamic_*')))
         self.assertFalse(list(CONTENT.glob('*.res.lua')), 'No dynamic UI plugin should remain active')
@@ -91,6 +97,71 @@ class PrefabResourceTests(unittest.TestCase):
         result = self.build('raised', {'streetTemplate': custom})
         self.assertTrue(all(group.params.type == custom for group in result.edgeLists.values()))
         self.assertIn('/simple/', self.build('raised').edgeLists[1].params.type)
+
+    def test_bridge_choice_images_match_built_resource_in_each_era(self):
+        definition = self.resource('raised_loop.con.lua')
+        bridge_params = [p for p in definition.params.values() if p.key.startswith('bridgeType')]
+        expected = {
+            1939: ['trestle', 'stone'],
+            1940: ['trestle', 'stone', 'steel', 'suspension'],
+            1969: ['trestle', 'stone', 'steel', 'suspension'],
+            1970: ['stone', 'steel', 'concrete', 'suspension'],
+            1999: ['stone', 'steel', 'concrete', 'suspension'],
+            2000: ['stone', 'steel', 'concrete', 'suspension', 'cable'],
+            2009: ['stone', 'steel', 'concrete', 'suspension', 'cable'],
+            2010: ['stone', 'steel', 'concrete', 'suspension', 'cable', 'tarch'],
+        }
+        stable_values = {}
+        for year, names in expected.items():
+            visible = [p for p in bridge_params if (p.yearFrom == 0 or p.yearFrom <= year)
+                       and (p.yearTo == 0 or year < p.yearTo)]
+            self.assertEqual(len(visible), 1)
+            param = visible[0]
+            self.assertEqual(param.uiType, 'IconButton')
+            self.assertEqual(param.location, 'Toolbar')
+            self.assertEqual(param.displayMode, 'Compact')
+            # Native IconButton maps the stored numeric value back to its icon.
+            # The optional images callback instead takes a raw index; omit it.
+            self.assertIsNone(param.images)
+            self.assertEqual(len(param.tooltips), len(names))
+            self.assertEqual(param.numbers[param.defaultIndex], 1)
+            for index, name in enumerate(names, 1):
+                resource = '::/infrastructure/bridge/' + name
+                self.assertEqual(param['values'][index], resource + '.tga')
+                value = param.numbers[index]
+                self.assertEqual(stable_values.setdefault(name, value), value)
+                bridge = self.build('raised', {param.key: value}).edgeLists[2]
+                self.assertEqual(bridge.edgeTypeName, resource + '.bridge')
+                self.assertEqual(self.build('lowered', {param.key: value}).edgeLists[2].edgeType, 'TUNNEL')
+        for value in (None, 0, -1, 100, 1.5, 'steel'):
+            params = {} if value is None else {'bridgeType': value}
+            self.assertEqual(self.build('raised', params).edgeLists[2].edgeTypeName,
+                             '::/infrastructure/bridge/stone.bridge')
+
+    def test_retired_bridge_selection_resets_without_changing_saved_construction(self):
+        saved = {'bridgeType': 2}
+        definition = self.resource('raised_loop.con.lua')
+        active = [p for p in definition.params.values() if p.key.startswith('bridgeType')
+                  and p.yearFrom <= 1970 and (p.yearTo == 0 or 1970 < p.yearTo)]
+        self.assertEqual(len(active), 1)
+        param = active[0]
+        # Native construction UI restores by key, or uses numbers[defaultIndex].
+        current = {param.key: saved.get(param.key, param.numbers[param.defaultIndex])}
+        self.assertEqual(self.build('raised', current).edgeLists[2].edgeTypeName,
+                         '::/infrastructure/bridge/stone.bridge')
+        self.assertEqual(self.build('raised', saved).edgeLists[2].edgeTypeName,
+                         '::/infrastructure/bridge/trestle.bridge')
+
+    def test_menu_images_use_native_dimensions_and_transparent_icons(self):
+        for kind in ('raised', 'lowered'):
+            definition = self.resource(kind + '_loop.con.lua')
+            for field, size in (('icon', (240, 150)), ('previewIcon', (720, 405))):
+                filename = definition.description[field].replace('.tga', '@2x.tga')
+                header = (CONTENT / filename).read_bytes()[:18]
+                self.assertEqual(struct.unpack_from('<HH', header, 12), size)
+                if field == 'icon':
+                    self.assertEqual(header[16], 32)
+                    self.assertEqual(header[17] & 15, 8)
 
     def test_complete_connected_free_track_graph_and_two_snap_ends(self):
         for kind, structure in (('raised', 'BRIDGE'), ('lowered', 'TUNNEL')):
@@ -132,13 +203,33 @@ class PrefabResourceTests(unittest.TestCase):
             self.assertEqual(category.data.menu, 'TRACKS')
             self.assertEqual(category.data.category, 'rail_constructions')
             self.assertIn('gui/construction/menu/menu_categories/category_rail_constructions@2x.tga', archive.namelist())
-            for name in ('infrastructure_bridge_32', 'infrastructure_tunnel_32'):
-                self.assertIn(f'gui/construction/build_control/{name}@2x.tga', archive.namelist())
             hud = archive.read('gui/construction/construction_desc_hud_icons.script.tl').decode('utf-8-sig')
             self.assertIn('configureTrackConstructionHudIconsFn', hud)
         for archive_name, resource in (('bridge', 'stone.bridge.lua'), ('tunnel', 'tunnel_a.tunnel.lua')):
             with ZipFile(GAME / f'base/content/infrastructure/{archive_name}.zip') as archive:
                 self.assertIn(f'{archive_name}/{resource}', archive.namelist())
+
+    @unittest.skipUnless(GAME is not None and (GAME / 'base/content/infrastructure/bridge.zip').is_file(),
+                         'set TF3_GAME_DIR for native resource checks')
+    def test_bridge_catalog_matches_native_rail_carriers_and_availability(self):
+        definition = self.resource('raised_loop.con.lua')
+        with ZipFile(GAME / 'base/content/infrastructure/bridge.zip') as archive:
+            for param in definition.params.values():
+                if not param.key.startswith('bridgeType'):
+                    continue
+                for icon in param['values'].values():
+                    filename = icon.removeprefix('::/infrastructure/')
+                    self.assertIn(filename, archive.namelist())
+                    source = archive.read(filename.replace('.tga', '.bridge.lua')).decode('utf-8-sig')
+                    carriers = re.search(r'carriers\s*=\s*\{([^}]+)\}', source).group(1)
+                    self.assertIn('"RAIL"', carriers)
+                    availability = re.search(r'availability\s*=\s*\{([^}]+)\}', source).group(1)
+                    year_from = int(re.search(r'yearFrom\s*=\s*(-?\d+)', availability).group(1))
+                    year_to = int(re.search(r'yearTo\s*=\s*(-?\d+)', availability).group(1))
+                    self.assertLessEqual(year_from, param.yearFrom)
+                    if year_to:
+                        self.assertGreater(param.yearTo, 0)
+                        self.assertLessEqual(param.yearTo, year_to)
 
 
 if __name__ == '__main__':

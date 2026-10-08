@@ -1,5 +1,6 @@
 local geometry = require "xin_smooth_rail_loop_1::/rail_loop/prefab_geometry.lua"
 local paramUtil = require "::/scripts/construction/param_util.tl"
+local bridgeChoices = require "xin_smooth_rail_loop_1::/rail_loop/bridge_choices.lua"
 
 function data()
   return {
@@ -21,8 +22,7 @@ function data()
           }
           if segment.kind == "BRIDGE" then
             group.edgeType = "BRIDGE"
-            -- Native stone bridges support rail in every year.
-            group.edgeTypeName = "::/infrastructure/bridge/stone.bridge"
+            group.edgeTypeName = bridgeChoices.resource(params.bridgeTypeModern or params.bridgeType)
           elseif segment.kind == "TUNNEL" then
             group.edgeType = "TUNNEL"
             group.edgeTypeName = "::/infrastructure/tunnel/tunnel_a.tunnel"
