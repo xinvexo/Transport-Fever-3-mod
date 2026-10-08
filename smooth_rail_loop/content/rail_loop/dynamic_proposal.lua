@@ -58,10 +58,10 @@ function M.pick(entity,details,mouse,snapping)
   return {entity=entity,u=u,p=p,t=t,revision=revision(entity)}
 end
 
-function M.make(a,b,options)
+function M.make(a,b,options,segments,info)
   assert(M.current(a) and M.current(b),"选中的轨道已改变，请重新选点")
   assert(a.entity~=b.entity,"请在另一条轨道上选择第二个点")
-  local segments,info=geometry.generate(a,b,options)
+  if not segments then segments,info=geometry.generate(a,b,options) end
   local proposal=api.type.SimpleProposal.new()
   local nodes,edges,removed={},{},{}
   local id=0
@@ -107,7 +107,12 @@ function M.make(a,b,options)
     return n,old
   end
   local start,source=attach(a)
-  local finish=attach(b)
+  local finish,finishSource=attach(b)
+  local function curve(component)
+    local p0,p1,t0,t1=edgeData(component)
+    return {p0=p0,p1=p1,t0=t0,t1=t1}
+  end
+  info.mainCrossings=geometry.mainTrackCrossings(segments,{curve(source),curve(finishSource)})
   -- Use the selected native track/bridge/tunnel resources, including mods.
   if options.trackTemplate then
     local index=api.res.streetTemplateRep.find(options.trackTemplate)

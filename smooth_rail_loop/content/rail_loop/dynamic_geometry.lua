@@ -102,6 +102,50 @@ function M.hermite(p0,p1,t0,t1,u)
   return p,t,dd
 end
 
+-- Diagnostic only: a valid return curve can still cross the through tracks
+-- that remain beyond its two junctions. The engine decides actual clearance.
+function M.mainTrackCrossings(segments, tracks)
+  local result = {}
+  local start,finish = segments[1].p0,segments[#segments].p1
+  local function near(a,b)
+    return (a[1]-b[1])^2+(a[2]-b[2])^2<0.01
+  end
+  local function cross(x,y,u,v) return x*v-y*u end
+  for trackIndex,track in ipairs(tracks) do
+    local samples = {}
+    for i=0,64 do samples[#samples+1]=M.hermite(track.p0,track.p1,track.t0,track.t1,i/64) end
+    for _,segment in ipairs(segments) do
+      local a=segment.p0
+      for i=1,8 do
+        local b=M.hermite(segment.p0,segment.p1,segment.t0,segment.t1,i/8)
+        local dx,dy=b[1]-a[1],b[2]-a[2]
+        for j=1,#samples-1 do
+          local c,d=samples[j],samples[j+1]
+          local ex,ey=d[1]-c[1],d[2]-c[2]
+          local det=cross(dx,dy,ex,ey)
+          if math.abs(det)>1e-8 then
+            local u=cross(c[1]-a[1],c[2]-a[2],ex,ey)/det
+            local v=cross(c[1]-a[1],c[2]-a[2],dx,dy)/det
+            if u>=0 and u<=1 and v>=0 and v<=1 then
+              local p={a[1]+u*dx,a[2]+u*dy,a[3]+u*(b[3]-a[3])}
+              local clearance=p[3]-(c[3]+v*(d[3]-c[3]))
+              if not near(p,start) and not near(p,finish) then
+                local duplicate=false
+                for _,hit in ipairs(result) do
+                  if hit.track==trackIndex and near(hit.position,p) then duplicate=true;break end
+                end
+                if not duplicate then result[#result+1]={track=trackIndex,position=p,clearance=clearance} end
+              end
+            end
+          end
+        end
+        a=b
+      end
+    end
+  end
+  return result
+end
+
 local function attempt(a,b,ta,tb,r,extension,elevation,path,bend)
   local total=path.length
   local forward=norm({ta[1]-tb[1],ta[2]-tb[2],0})

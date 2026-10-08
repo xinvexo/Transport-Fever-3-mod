@@ -71,3 +71,38 @@ def verify_geometry():
 class GeometryTests(unittest.TestCase):
     def test_endpoints_continuity_radius_and_grade_for_240_cases(self):
         self.assertEqual(verify_geometry(), 240)
+
+    def test_434m_flat_loop_crosses_both_retained_main_tracks(self):
+        a = {'p': [0, 0, 0], 't': [0, 1, 0]}
+        b = {'p': [5, 0, 0], 't': [0, 1, 0]}
+        tracks = table([{'p0': [x, -2000, 0], 'p1': [x, 2000, 0],
+                         't0': [0, 4000, 0], 't1': [0, 4000, 0]} for x in [0, 5]])
+        for direction in [1, 2]:
+            segments, info = geom.generate(table(a), table(b), table({'direction': direction}))
+            self.assertAlmostEqual(info.length, 434, delta=0.1)
+            hits = geom.mainTrackCrossings(segments, tracks)
+            self.assertEqual(len(hits), 2)
+            self.assertEqual({h.track for h in hits.values()}, {1, 2})
+            for hit in hits.values():
+                self.assertAlmostEqual(hit.clearance, 0)
+                self.assertAlmostEqual(abs(hit.position[2]), 162.4, delta=0.2)
+
+    def test_raised_and_lowered_crossings_report_vertical_separation(self):
+        a = {'p': [0, 0, 0], 't': [0, 1, 0]}
+        b = {'p': [5, 0, 0], 't': [0, 1, 0]}
+        tracks = table([{'p0': [x, -2000, 0], 'p1': [x, 2000, 0],
+                         't0': [0, 4000, 0], 't1': [0, 4000, 0]} for x in [0, 5]])
+        for height in [8, -16]:
+            segments, _ = geom.generate(table(a), table(b), table({'elevation': height}))
+            hits = geom.mainTrackCrossings(segments, tracks)
+            self.assertEqual(len(hits), 2)
+            for hit in hits.values():
+                self.assertAlmostEqual(hit.clearance, height, places=4)
+
+    def test_tracks_ending_at_the_connections_are_not_through_track_crossings(self):
+        a = {'p': [0, 0, 0], 't': [0, 1, 0]}
+        b = {'p': [5, 0, 0], 't': [0, 1, 0]}
+        segments, _ = geom.generate(table(a), table(b), table({}))
+        tracks = table([{'p0': [x, -1000, 0], 'p1': [x, 0, 0],
+                         't0': [0, 1000, 0], 't1': [0, 1000, 0]} for x in [0, 5]])
+        self.assertEqual(len(geom.mainTrackCrossings(segments, tracks)), 0)

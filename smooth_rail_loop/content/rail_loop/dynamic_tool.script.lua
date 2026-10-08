@@ -1,6 +1,8 @@
 local react = require "::/gui/main/react.lua"
 local builtin = require "::/gui/main/builtin.lua"
 local proposalUtil = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_proposal.lua"
+local geometry = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_geometry.lua"
+local previewUtil = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_preview.lua"
 local enum = api.type["enum"]
 local constructionUtil = ug_require "::/gui/construction/construction_react_util.tl"
 local entryPoint = ug_require "::/gui/main/mod_entry_point.tl"
@@ -33,32 +35,60 @@ local function Tool(params)
     message = "① 点击第一条轨道上的连接点"})
   local tick = react.useState(0)
   local s = state:get()
+  local function active() return not state:hasExpired() and not s.closed end
   if not s.loggedEntry then
     s.loggedEntry = true
     log.message("[Rail Loop] Tool entered: "..params.definition.resName)
   end
-  local function refresh() if not state:hasExpired() then tick:set(tick:old()+1) end end
+  local function refresh() if active() then tick:set(tick:old()+1) end end
   local function invalidate()
     s.serial = s.serial+1;s.ready = false;s.proposal = nil;s.price = nil;s.info = nil
+    s.segments = nil;s.renderEdges = nil;s.renderStatus = nil
+    s.previewChecked = false;s.previewValid = false;s.failed = false;s.previewMessage = nil;s.previewCost = nil
   end
   local function reset()
-    if s.busy then return end
+    if not active() or s.busy then return end
     invalidate();s.points = {};s.extension = 0;s.direction = 1;s.pendingShape = nil;s.message = "① 点击第一条轨道上的连接点";refresh()
+  end
+  local function back()
+    if not active() or s.busy then return end
+    if #s.points>0 then reset();return end
+    s.closed = true;invalidate()
+    -- abort() alone leaves the mouse toolbar in mode 3 and rebinds this tool.
+    local menuApi = toolbarApi
+    local mode = menuApi and menuApi.getParamByKey("mode")
+    if mode then menuApi.changeParam(mode.index,1) end
+    params.setActionFn(nil)
+    if not mode then params.abort() end
+  end
+  local function showPreviewResult()
+    s.ready = s.previewValid and not s.pendingShape or false
+    s.price = s.ready and s.previewCost or nil
+    s.message = s.pendingShape and "正在更新施工预览……" or
+      (s.ready and "移动鼠标调整长度；用原高度、弯曲和桥隧选项调整，单击确认。" or s.previewMessage or "正在检查施工预览……")
   end
   local function recompute()
     invalidate()
     local opts = currentOptions(params,s)
     s.optionKey = optionKey(opts)
     if #s.points == 2 then
-      local ok,proposal,info = pcall(proposalUtil.make,s.points[1],s.points[2],opts)
-      if ok then s.proposal = proposal;s.info = info;s.message = "正在检查施工预览……"
-      else s.message = errorMessage(proposal);log.message("[Rail Loop] Preview failed: "..s.message) end
+      local ok,segments,info = pcall(geometry.generate,s.points[1],s.points[2],opts)
+      if ok then
+        s.segments = segments;s.info = info
+        local made,proposal = pcall(proposalUtil.make,s.points[1],s.points[2],opts,segments,info)
+        if made then s.proposal = proposal;s.message = "正在检查施工预览……"
+        else s.failed = true;s.message = errorMessage(proposal) end
+      else s.failed = true;s.message = errorMessage(segments) end
+      if s.failed then
+        s.previewMessage = s.message
+        log.message("[Rail Loop] Preview failed: "..s.message)
+      end
     end
     refresh()
   end
   local build
   local function pick(entity,indices,details)
-    if s.busy then return true end
+    if not active() or s.busy then return true end
     if #s.points == 2 then if s.ready then build() end;return true end
     local ok,point = pcall(proposalUtil.pick,entity,details,s.mouse,currentOptions(params,s).snapping)
     if not ok then s.message = errorMessage(point);log.message("[Rail Loop] Pick failed: "..s.message);refresh();return true end
@@ -66,13 +96,14 @@ local function Tool(params)
       s.message = "请选择另一条轨道上的连接点";refresh();return true
     end
     s.points[#s.points+1] = point
-    log.message("[Rail Loop] Point "..#s.points..": entity="..entity)
+    log.message(string.format("[Rail Loop] Point %d: entity=%d u=%.6f position=(%.3f,%.3f,%.3f) tangent=(%.3f,%.3f,%.3f)",
+      #s.points,point.entity,point.u,point.p[1],point.p[2],point.p[3],point.t[1],point.t[2],point.t[3]))
     if #s.points == 2 then recompute()
     else s.message = "② 点击另一条轨道上的连接点";refresh() end
     return true
   end
   build = function()
-    if s.busy or not s.ready or not s.proposal then return end
+    if not active() or s.busy or s.pendingShape or not s.ready or not s.proposal then return end
     if optionKey(currentOptions(params,s))~=s.optionKey then recompute();return end
     if not proposalUtil.current(s.points[1]) or not proposalUtil.current(s.points[2]) then recompute();return end
     local balance = api.engine.util.finance.getPlayersBalance(api.engine.util.getPlayer())
@@ -91,7 +122,7 @@ local function Tool(params)
           end
           api.gui.construction.updateRefundableEntities(valid,data.proposal.proposal)
         end
-        if state:hasExpired() then return end
+        if not active() then return end
         s.busy = false
         if success then reset();s.message = "已建造。可以继续选择下一组连接点。"
         else invalidate();s.message = "施工未成功，请调整长度或重新选点后重试。" end
@@ -101,7 +132,7 @@ local function Tool(params)
     if not ok then s.busy = false;s.message = errorMessage(err);refresh() end
   end
   react.onStep(function()
-    if s.busy then return end
+    if not active() or s.busy then return end
     if #s.points>0 then
       for _,p in ipairs(s.points) do
         if not proposalUtil.current(p) then reset();s.message = "轨道已改变，请重新选点。";refresh();return end
@@ -118,6 +149,7 @@ local function Tool(params)
     builtin.Selector{
       filter = proposalUtil.isTrack,
       onProcessMouseEvent = function(event)
+        if not active() then return false end
         s.mouse = {x=event.x,y=event.y}
         if #s.points==2 and not s.busy and api.gui.mouse.hasTerrainPosition() then
           local p = api.gui.mouse.getTerrainPosition()
@@ -128,7 +160,9 @@ local function Tool(params)
           local extension = math.min(800,math.floor(math.max(0,math.abs(distance)-180)/5)*5)
           local direction = distance<0 and 2 or 1
           if extension~=(s.extension or 0) or direction~=(s.direction or 1) then
-            s.pendingShape = {extension,direction};s.ready = false
+            s.pendingShape = {extension,direction};showPreviewResult();refresh()
+          elseif s.pendingShape then
+            s.pendingShape = nil;showPreviewResult();refresh()
           end
         end
         -- Empty terrain is not a selectable track entity. Handle confirmation
@@ -152,28 +186,75 @@ local function Tool(params)
       simpleProposal = s.proposal,
       entityForRefundableContext = api.engine.util.getPlayer(),
       proposalId = "xin-dynamic-loop:"..tostring(s)..":"..serial,
-      onCreateProposalData = function(data)
-        if state:hasExpired() or s.serial~=serial or s.busy then return end
-        s.price = data.costs
+      onCreateProposalData = function(data,preparedProposal)
+        if not active() or s.serial~=serial or s.busy then return end
         local errors = data.errorState
-        s.ready = not s.pendingShape and not errors.critical and #errors.messages==0
-        s.message = s.ready and "移动鼠标调整长度；用原高度、弯曲和桥隧选项调整，单击确认。" or table.concat(errors.messages,"\n")
-        if not s.ready and s.message=="" then s.message = "当前位置无法施工，请调整长度或方向。" end
+        s.previewChecked = true;s.previewCost = data.costs
+        s.previewValid = not errors.critical and #errors.messages==0
+        s.previewMessage = table.concat(errors.messages,"\n")
+        if not s.previewValid then
+          if s.previewMessage=="" then s.previewMessage = "游戏拒绝了施工方案，请调整长度、高度或连接点。" end
+          for _,hit in ipairs(s.info.mainCrossings or {}) do
+            if math.abs(hit.clearance)<5 then
+              s.previewMessage = s.previewMessage.."\n回环穿过保留的主线且高差不足，请用原高度控件抬升或降低，或改从轨道端点接出。"
+              break
+            end
+          end
+          if s.loggedPreviewSerial~=serial then
+            s.loggedPreviewSerial = serial
+            local collisionIds={}
+            for _,hit in ipairs(data.collisionInfo and data.collisionInfo.collisionEntities or {}) do
+              if #collisionIds<8 then collisionIds[#collisionIds+1]=tostring(hit.entity) end
+            end
+            local crossingInfo={}
+            for _,hit in ipairs(s.info.mainCrossings or {}) do
+              crossingInfo[#crossingInfo+1]=string.format("track%d@%.1f,%.1f dz=%.2f",hit.track,hit.position[1],hit.position[2],hit.clearance)
+            end
+            local street=s.proposal.streetProposal
+            local prepared=preparedProposal and preparedProposal.proposal
+            log.message(string.format("[Rail Loop] Engine preview rejected: serial=%d critical=%s cost=%s messages=[%s] warnings=[%s] infos=[%s] collisions=[%s] nodes=%d edges=%d removed=%d preparedEdges=%s options=%s crossings=[%s]",
+              serial,tostring(errors.critical),tostring(data.costs),table.concat(errors.messages," | "),
+              table.concat(errors.warnings or {}," | "),table.concat(errors.infos or {}," | "),table.concat(collisionIds,","),
+              #street.nodesToAdd,#street.edgesToAdd,#street.edgesToRemove,
+              prepared and tostring(#prepared.addedSegments) or "none",s.optionKey,table.concat(crossingInfo,"; ")))
+          end
+        end
+        showPreviewResult()
         refresh()
       end,
     }
+  end
+  if s.segments then
+    local status=(s.failed or (s.previewChecked and not s.previewValid)) and "blocked" or (s.ready and "ready" or "pending")
+    if s.renderStatus~=status then
+      local color=status=="blocked" and api.type.Vec4f.new(1,0.2,0.15,0.9) or
+        (status=="ready" and api.type.Vec4f.new(0.15,0.9,0.55,0.85) or api.type.Vec4f.new(0.2,0.7,1,0.85))
+      local ok,edges=pcall(previewUtil.make,s.segments,color)
+      s.renderEdges=ok and edges or nil;s.renderStatus=status
+      if not ok then log.message("[Rail Loop] Rail outline failed: "..errorMessage(edges)) end
+    end
+    if s.renderEdges then
+      children[#children+1]=builtin.EdgeRenderable{edges=s.renderEdges,ignoreDepth=true}
+    end
   end
   local message = s.message
   if s.info then message = message..string.format("\n长度 %.0f m",s.info.length) end
   children[#children+1] = builtin.ActionTooltip{
     recipe = constructionUtil.SimpleTooltipRecipe,
-    param = {message = {message=message,bad=s.proposal~=nil and not s.ready,good=s.ready or false},cost=s.price},
+    param = {message = {message=message,bad=s.failed or (s.previewChecked and not s.previewValid and not s.pendingShape),good=s.ready or false},cost=s.price},
   }
   local layer = api.type.LayerConfig.new()
   layer.undergroundMode = currentOptions(params,s).underground
   children[#children+1] = builtin.LayerConfig{config=layer}
   react.useInputAction("IA_APPLY",react.iaHandler(build,function() return s.ready and not s.busy end,"建造回环"))
-  react.useInputAction("IA_ABORT",react.iaHandler(reset,function() return #s.points>0 and not s.busy end,"重新选点"))
+  local function backState()
+    local states=api.gui.inputAction.InputActionState
+    if not active() then return states.Disabled end
+    return s.busy and states.Inactive or states.Enabled
+  end
+  react.useInputAction("IA_ABORT",react.iaHandler(back,backState,"取消回环"))
+  -- Native construction uses this action to capture Escape before menu-back.
+  react.useInputAction("IA_CLOSE_TOPMOST_WINDOW",react.iaHandler(back,backState,"取消回环"))
   -- Reuse the native parameter APIs and step functions for native shortcuts.
   local function step(key,direction)
     local menuApi = toolbarApi
@@ -192,7 +273,7 @@ local function Tool(params)
   return builtin.ActionDescriptor{
     tool = "construction-menu-tracks",terrainCirclePolicy = "Never",
     highlightedEntities = #s.points>0 and {s.points[1].entity,s.points[2] and s.points[2].entity or s.points[1].entity} or {},
-    onBack = function() if #s.points>0 then reset() else params.abort() end end,
+    onBack = back,
     children = children,
   }
 end
@@ -254,5 +335,5 @@ end
 
 local entry = react.RegisterPluginRecipe(entryPoint.ModEntryPointExtension,
   "XinNativeRailLoopEntry",function() return nil end)
-log.message("[Rail Loop] Native track mode installed (revision 3.2).")
+log.message("[Rail Loop] Native track mode installed (revision 4).")
 function data() return {entry=entry} end
