@@ -266,8 +266,11 @@ local function Tool(params)
               break
             end
           end
-          if s.loggedPreviewSerial~=serial then
-            s.loggedPreviewSerial = serial
+          local a,b=planPoints()
+          local rejectKey=table.concat({tostring(errors.critical),table.concat(errors.messages,"|"),
+            #s.points,a.entity,a.revision,b.entity,b.revision,optionKey(currentOptions(params,s))},":")
+          if s.lastRejectedPlan~=rejectKey then
+            s.lastRejectedPlan=rejectKey
             local collisionIds={}
             for _,hit in ipairs(data.collisionInfo and data.collisionInfo.collisionEntities or {}) do
               if #collisionIds<8 then collisionIds[#collisionIds+1]=tostring(hit.entity) end
@@ -283,7 +286,12 @@ local function Tool(params)
               table.concat(errors.warnings or {}," | "),table.concat(errors.infos or {}," | "),table.concat(collisionIds,","),
               #street.nodesToAdd,#street.edgesToAdd,#street.edgesToRemove,
               prepared and tostring(#prepared.addedSegments) or "none",optionKey(currentOptions(params,s)),table.concat(crossingInfo,"; ")))
+            if proposalUtil.current(a) and proposalUtil.current(b) then
+              local ok,description=pcall(proposalUtil.describe,s.proposal,preparedProposal,a,b)
+              log.message("[Rail Loop] "..(ok and "Rejected graph: " or "Graph diagnostic failed: ")..tostring(description))
+            end
           end
+        else s.lastRejectedPlan=nil
         end
         showPreviewResult()
         refresh()
@@ -299,12 +307,20 @@ local function Tool(params)
       local ok,edges,diagnostics=pcall(previewUtil.make,s.segments,color)
       s.renderEdges=ok and edges or nil;s.renderStatus=status
       s.renderError=not ok
-      if not ok then log.message("[Rail Loop] Rail outline failed: "..errorMessage(edges))
-      elseif s.loggedOutlineSerial~=s.serial then
-        s.loggedOutlineSerial=s.serial
-        log.message(string.format("[Rail Loop] Rail outline verified: serial=%d edges=%d first=(%.3f,%.3f,%.3f) last=(%.3f,%.3f,%.3f) sampleError=%.6f",
-          s.serial,#edges,diagnostics.first.x,diagnostics.first.y,diagnostics.first.z,
-          diagnostics.last.x,diagnostics.last.y,diagnostics.last.z,diagnostics.maxError))
+      if not ok then
+        local message=errorMessage(edges)
+        if s.lastOutlineError~=message then log.message("[Rail Loop] Rail outline failed: "..message) end
+        s.lastOutlineError=message
+      else
+        s.lastOutlineError=nil
+        local a,b=planPoints()
+        local outlineKey=a and table.concat({#s.points,a.entity,a.revision,b.entity,b.revision,optionKey(currentOptions(params,s))},":")
+        if not s.planDirty and not s.pendingShape and s.loggedOutlineKey~=outlineKey then
+          s.loggedOutlineKey=outlineKey
+          log.message(string.format("[Rail Loop] Rail outline geometry checked: serial=%d edges=%d first=(%.3f,%.3f,%.3f) last=(%.3f,%.3f,%.3f) sampleError=%.6f",
+            s.serial,#edges,diagnostics.first.x,diagnostics.first.y,diagnostics.first.z,
+            diagnostics.last.x,diagnostics.last.y,diagnostics.last.z,diagnostics.maxError))
+        end
       end
     end
   end
@@ -447,5 +463,5 @@ end
 
 local entry = react.RegisterPluginRecipe(entryPoint.ModEntryPointExtension,
   "XinNativeRailLoopEntry",function() return nil end)
-log.message("[Rail Loop] Native track mode installed (revision 7).")
+log.message("[Rail Loop] Native track mode installed (revision 8).")
 function data() return {entry=entry} end

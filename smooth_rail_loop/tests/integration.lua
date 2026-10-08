@@ -11,25 +11,33 @@ local function edge(x)
     edgeDecorations={{42,true}},clone=function(self) return copy(self) end}
 end
 local entities={[10]=edge(0),[20]=edge(5)}
+local baseNodes,constructionOwners,constructions={},{},{}
+for _,value in pairs(entities) do
+  baseNodes[value.node0]={position=value.position0}
+  baseNodes[value.node1]={position=value.position1}
+end
 local revision=1
 local revisions,networks={},{}
 local enum={RoadType={TRACK="TRACK"},BaseEdgeType={NORMAL="NORMAL",BRIDGE="BRIDGE",TUNNEL="TUNNEL"},
   ScriptParamType={Slider="Slider",ComboBox="ComboBox",Button="Button"},
   ScriptParamLocation={Default=1},ScriptParamDisplayMode={Horizontal=1}}
-local components={BASE_EDGE="BASE_EDGE",PLAYER_OWNED="PLAYER_OWNED",TRANSPORT_NETWORK="TRANSPORT_NETWORK"}
+local components={BASE_EDGE="BASE_EDGE",BASE_NODE="BASE_NODE",CONSTRUCTION="CONSTRUCTION",PLAYER_OWNED="PLAYER_OWNED",TRANSPORT_NETWORK="TRANSPORT_NETWORK"}
 local built,previewCallbacks=nil,{}
 api={type={enum=enum,ComponentType=components,
     Vec3f={new=v3},Vec4f={new=function(...) return {...} end},EdgePos={new=copy},
     SimpleProposal={new=function() return {streetProposal={}} end},
     NodeAndEntity={new=function() return {comp={}} end},SegmentAndEntity={new=function() return {comp={}} end},
     Context={new=function() return {} end}},
-  engine={entityExists=function(id) return entities[id]~=nil end,
+  engine={entityExists=function(id) return entities[id]~=nil or baseNodes[id]~=nil or constructions[id]~=nil end,
     getRevision=function(id) return {num={revisions[id] or revision,0,0}} end,
     getComponent=function(id,kind)
       if kind=="BASE_EDGE" then return entities[id] end
       if kind=="PLAYER_OWNED" then return {player=1} end
       if kind=="TRANSPORT_NETWORK" then return networks[id] end
+      if kind=="BASE_NODE" then return baseNodes[id] end
+      if kind=="CONSTRUCTION" then return constructions[id] end
     end,
+    system={streetConnectorSystem={getConstructionEntityForEdge=function(id) return constructionOwners[id] or -1 end}},
     util={getPlayer=function() return 1 end,finance={getPlayersBalance=function() return 1e9 end}}},
   res={bridgeTypeRep={find=function() return 7 end},tunnelTypeRep={find=function() return 8 end}},
   gui={SelectionDetails={Type={TransportNetworkEdge=1}},camera={world2Screen=function(p) return p end},
@@ -65,6 +73,11 @@ for _,e in ipairs(p.edgesToAdd) do
 end
 assert(p.edgesToAdd[5].comp.node0==p.edgesToAdd[1].comp.node1)
 assert(p.edgesToAdd[#p.edgesToAdd].comp.node1==p.edgesToAdd[3].comp.node1)
+local description=proposal.describe(out,{proposal={addedNodes=p.nodesToAdd,addedSegments=p.edgesToAdd}},a,b)
+assert(description:find("duplicateIds=0 missingNodes=0 endpointGaps=0 zeroTangents=0",1,true))
+local badGraph=copy(out)
+badGraph.streetProposal.edgesToAdd[1].comp.position0.x=badGraph.streetProposal.edgesToAdd[1].comp.position0.x+3
+assert(proposal.describe(badGraph,nil,a,b):find("endpointGaps=1",1,true))
 -- Splitting retains the exact source cubic, not a straight approximation.
 for k=1,4 do
   local s=p.edgesToAdd[k].comp
@@ -80,6 +93,12 @@ entities[10].objects={{999,2}}
 assert(not pcall(proposal.make,a,b,{extension=0,elevation=0,direction=1}))
 assert(entities[10].objects[1][1]==999)
 entities[10].objects={}
+constructions[700]={};constructionOwners[10]=700
+assert(proposal.pickProblem(a):find("车站或建筑",1,true))
+assert(not pcall(proposal.make,a,b,{extension=0,elevation=0,direction=1}))
+local stationEnd=proposal.pick(10,nil,{x=0,y=0})
+assert(proposal.pickProblem(stationEnd)==nil,"Existing station endpoints must remain usable")
+constructionOwners[10]=nil;constructions[700]=nil
 revision=2;assert(not pcall(proposal.make,a,b,{extension=0,elevation=0,direction=1}));revision=1
 assert(not pcall(proposal.make,a,a,{extension=0,elevation=0,direction=1}))
 
@@ -159,13 +178,17 @@ local react={
   useInputAction=function(key,handler) current.actions[key]=handler end,
   onStep=function(fn) current.steps[#current.steps+1]=fn end,
 }
-local builtin={type={Orientation={Vertical=1,Horizontal=2},EdgeRenderable={Edge={new=function(shape)
-  assert(shape.type=="CUBIC_SPLINE" and #shape.cubicSpline.pos==2 and #shape.cubicSpline.tangent==2)
-  assert(shape.height and shape.tangent and shape.length>0 and shape.width>0)
-  return {geometry=shape}
-end}}}}
-builtin.type.ControlPointInfo={State={Invalid="Invalid",Hover="Hover",Idle="Idle"},
-  new=function(position,offsetZ,radius,state) return {position=position,offsetZ=offsetZ,radius=radius,state=state} end}
+-- GUI parameter constructors do not promise readable or prefilled fields.
+-- Only the native consumer can inspect these write-only parameter objects.
+local nativeParams=setmetatable({}, {__mode="k"})
+local function newNativeParams(...)
+  local result={};nativeParams[result]={}
+  return setmetatable(result,{__index=function() return nil end,
+    __newindex=function(self,key,value) nativeParams[self][key]=value end})
+end
+local builtin={type={Orientation={Vertical=1,Horizontal=2},EdgeRenderable={Edge={new=newNativeParams}}}}
+builtin.type.ControlPointInfo={State={Invalid="Invalid",Hover="Hover",Idle="Idle",IdleOverEdge="IdleOverEdge"},
+  new=newNativeParams}
 for _,name in ipairs({"Selector","ProposalViewer","ActionDescriptor","ActionTooltip","LayerConfig","EdgeRenderable"}) do
   builtin[name]=function(p)
     if name=="ActionDescriptor" then
@@ -187,7 +210,19 @@ for _,name in ipairs({"Selector","ProposalViewer","ActionDescriptor","ActionTool
     end
     if name=="EdgeRenderable" then
       assert(#p.edges>0 and p.ignoreDepth)
-      for _,e in ipairs(p.edges) do assert(#e.colors==2 and e.width>0 and e.stepSize>0) end
+      local converted={}
+      for _,opaque in ipairs(p.edges) do
+        local e=assert(nativeParams[opaque],"Expected a native edge parameter object")
+        assert(e.geometry and e.geometry.type=="CUBIC_SPLINE","Missing explicit preview geometry")
+        assert(#e.colors==2 and e.width>0 and e.stepSize>0)
+        converted[#converted+1]=e
+      end
+      p.edges=converted
+    elseif name=="ProposalViewer" and p.controlPointInfo then
+      local cp=assert(nativeParams[p.controlPointInfo])
+      assert(cp.position and cp.offsetZ==0.25 and cp.radius==2.5,"Missing explicit control-point fields")
+      assert(cp.state=="IdleOverEdge" or cp.state=="Idle" or cp.state=="Invalid")
+      p.controlPointInfo=cp
     end
     p.recipeName=name;return p
   end
@@ -319,7 +354,7 @@ end
 local function checked(preview,critical,messages,cost)
   preview.onCreateProposalData({costs=cost or 123,errorState={critical=critical,messages=messages or {},
     warnings={"test warning"},infos={}},collisionInfo={collisionEntities={{entity=10}}}},
-    {proposal={addedSegments=preview.simpleProposal.streetProposal.edgesToAdd}})
+    {proposal={addedNodes=preview.simpleProposal.streetProposal.nodesToAdd,addedSegments=preview.simpleProposal.streetProposal.edgesToAdd}})
 end
 
 -- With no picks, Escape explicitly leaves mode 3; false would consume the key.
@@ -333,7 +368,7 @@ toolbar.changeParam(1,3);stepAll();assert(bound)
 action=render();local selector=find(action,"Selector")
 selector.onProcessMouseEvent({x=0,y=.1,type="Moved"});selector.onHover(10)
 action=render();assert(#markers(action)==1 and markers(action)[1].position.y==0)
-assert(markers(action)[1].state=="Hover" and enabled("IA_APPLY"))
+assert(markers(action)[1].state=="IdleOverEdge" and enabled("IA_APPLY"))
 options.disableSnapping=2;stepAll();action=render()
 assert(math.abs(markers(action)[1].position.y-.1)<.001)
 input("IA_APPLY").fn();action=render()
@@ -372,7 +407,7 @@ action=twoPoints();local preview=find(action,"ProposalViewer")
 assert(preview and not enabled("IA_APPLY"))
 local outline=find(action,"EdgeRenderable");assert(outline and #outline.edges>2)
 assert(outline.edges[1].colors[1][3]==1)
-assert(table.concat(logs,"\n"):find("Rail outline verified:",1,true))
+assert(table.concat(logs,"\n"):find("Rail outline geometry checked:",1,true))
 local left,right=outline.edges[1].geometry,outline.edges[2].geometry
 assert(math.abs(left.cubicSpline.pos[1].x-right.cubicSpline.pos[1].x-1.5)<1e-6)
 assert(math.abs(left.cubicSpline.pos[1].y-350)<.001 and left.height.x==0)

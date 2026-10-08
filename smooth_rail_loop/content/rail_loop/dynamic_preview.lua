@@ -4,8 +4,11 @@ local M = {}
 
 function M.controlPoint(point,hover,invalid)
   local kind=builtin.type.ControlPointInfo
-  local state=invalid and kind.State.Invalid or (hover and kind.State.Hover or kind.State.Idle)
-  return kind.new(api.type.Vec3f.new(point.p[1],point.p[2],point.p[3]),0.25,2.5,state)
+  local state=invalid and kind.State.Invalid or (hover and kind.State.IdleOverEdge or kind.State.Idle)
+  local position=api.type.Vec3f.new(point.p[1],point.p[2],point.p[3])
+  local control=kind.new(position,0.25,2.5,state)
+  control.position=position;control.offsetZ=0.25;control.radius=2.5;control.state=state
+  return control
 end
 
 local function makeEdge(p0,p1,t0,t1,color,width)
@@ -37,9 +40,11 @@ local function makeEdge(p0,p1,t0,t1,color,width)
   end
   check(shape)
   local edge=builtin.type.EdgeRenderable.Edge.new(shape)
-  check(edge.geometry)
+  -- GUI parameter constructors need explicit fields. Their Lua getters may
+  -- be unavailable; validate the geometry before passing it to the renderer.
+  edge.geometry=shape
   edge.colors={color,color};edge.width=width;edge.offsetZ=0.25;edge.stepSize=0.5
-  return edge,maxError
+  return edge,maxError,shape
 end
 
 -- Fixed points are small rings, not selected rail entities. They join the same
@@ -62,6 +67,7 @@ end
 -- Draw the planned rails even when the engine rejects the construction.
 function M.make(segments,color)
   local edges,maxError={},0
+  local first,last
   for _,segment in ipairs(segments) do
     for _,offset in ipairs({-0.75,0.75}) do
       local function endpoint(u)
@@ -73,11 +79,12 @@ function M.make(segments,color)
       end
       local p0,t0=endpoint(0)
       local p1,t1=endpoint(1)
-      local edge,error=makeEdge(p0,p1,t0,t1,color,1)
+      local edge,error,shape=makeEdge(p0,p1,t0,t1,color,1)
       edges[#edges+1]=edge;maxError=math.max(maxError,error)
+      first=first or shape:calcPos(0)[1];last=shape:calcPos(1)[1]
     end
   end
-  return edges,{maxError=maxError,first=edges[1].geometry:calcPos(0)[1],last=edges[#edges].geometry:calcPos(1)[1]}
+  return edges,{maxError=maxError,first=first,last=last}
 end
 
 return M

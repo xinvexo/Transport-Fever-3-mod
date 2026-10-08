@@ -22,6 +22,16 @@ function M.isTrack(entity)
   return e~=nil and e.roadType==api.type["enum"].RoadType.TRACK
 end
 
+local function constructionOwner(entity)
+  local systems=api.engine.system
+  local connector=systems and systems.streetConnectorSystem
+  if not connector then return nil end
+  local owner=connector.getConstructionEntityForEdge(entity)
+  if owner~=nil and owner>=0 and api.engine.entityExists(owner) and
+      api.engine.getComponent(owner,api.type.ComponentType.CONSTRUCTION) then return owner end
+  return nil
+end
+
 function M.resnap(point,snapping)
   assert(M.current(point),"轨道已改变，请重新选点")
   local edge=api.engine.getComponent(point.entity,api.type.ComponentType.BASE_EDGE)
@@ -46,6 +56,7 @@ end
 function M.pickProblem(point,first)
   if first and first.entity==point.entity then return "请选择另一条轨道上的连接点" end
   if point.u~=0 and point.u~=1 then
+    if constructionOwner(point.entity) then return "这段轨道属于车站或建筑，请选择其端点或外侧轨道" end
     local edge=api.engine.getComponent(point.entity,api.type.ComponentType.BASE_EDGE)
     if #edge.objects>0 then return "这段轨道带有信号或路标，请选择端点或旁边的轨道段" end
   end
@@ -119,6 +130,7 @@ function M.make(a,b,options,segments,info)
     local old=api.engine.getComponent(point.entity,api.type.ComponentType.BASE_EDGE)
     if point.u==0 then return old.node0,old end
     if point.u==1 then return old.node1,old end
+    assert(not constructionOwner(point.entity),"这段轨道属于车站或建筑，请选择其端点或外侧轨道")
     -- Modern signal construction parameters cannot be faithfully reconstructed
     -- through SimpleProposal.EdgeObject. Never silently discard them.
     assert(#old.objects==0,"该轨道段上有信号或路标，请改选旁边不带信号的轨道段或已有端点")
@@ -165,5 +177,56 @@ function M.make(a,b,options,segments,info)
   proposal.streetProposal.edgesToAdd=edges
   proposal.streetProposal.edgesToRemove=removed
   return proposal,info
+end
+
+-- Read back native proposal fields rather than trusting the Lua-side plan or
+-- mock constructors. Diagnostic only: the engine remains the build authority.
+local function graphSummary(nodes,edges)
+  local positions,seen={},{}
+  local duplicates,missing,gaps,zeroTangents=0,0,0,0
+  local minimum=math.huge
+  local function remember(id)
+    if seen[id] then duplicates=duplicates+1 end
+    seen[id]=true
+  end
+  for _,node in ipairs(nodes) do
+    remember(node.entity);positions[node.entity]=node.comp.position
+  end
+  local function position(id)
+    if positions[id] then return positions[id] end
+    if id>=0 and api.engine.entityExists(id) then
+      local node=api.engine.getComponent(id,api.type.ComponentType.BASE_NODE)
+      if node then positions[id]=node.position;return node.position end
+    end
+  end
+  local function distance(a,b) return math.sqrt((a.x-b.x)^2+(a.y-b.y)^2+(a.z-b.z)^2) end
+  for _,edge in ipairs(edges) do
+    remember(edge.entity)
+    local comp=edge.comp
+    minimum=math.min(minimum,distance(comp.position0,comp.position1))
+    for _,endIndex in ipairs({0,1}) do
+      local node=position(comp["node"..endIndex])
+      if not node then missing=missing+1
+      elseif distance(node,comp["position"..endIndex])>0.05 then gaps=gaps+1 end
+      local tangent=comp["tangent"..endIndex]
+      if tangent.x^2+tangent.y^2<1e-10 then zeroTangents=zeroTangents+1 end
+    end
+  end
+  return string.format("nodes=%d edges=%d duplicateIds=%d missingNodes=%d endpointGaps=%d zeroTangents=%d minChord=%.5f",
+    #nodes,#edges,duplicates,missing,gaps,zeroTangents,minimum)
+end
+
+function M.describe(proposal,prepared,a,b)
+  local street=proposal.streetProposal
+  local parts={"simple{"..graphSummary(street.nodesToAdd,street.edgesToAdd).."}"}
+  if prepared then
+    parts[#parts+1]="prepared{"..graphSummary(prepared.proposal.addedNodes,prepared.proposal.addedSegments).."}"
+  end
+  for index,point in ipairs({a,b}) do
+    parts[#parts+1]=string.format("point%d{id=%s u=%.7f p=(%.5f,%.5f,%.5f) t=(%.5f,%.5f,%.5f) construction=%s}",
+      index,tostring(point.entity),point.u,point.p[1],point.p[2],point.p[3],point.t[1],point.t[2],point.t[3],
+      tostring(constructionOwner(point.entity)))
+  end
+  return table.concat(parts," ")
 end
 return M
