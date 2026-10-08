@@ -128,6 +128,33 @@ class TerrainTests(unittest.TestCase):
         np.testing.assert_allclose(list(parts[1].p1.values()), list(parts[2].p0.values()), atol=1e-9)
         np.testing.assert_allclose(list(parts[2].p1.values()), [1.8, 0, 0], atol=1e-9)
 
+    def test_joining_short_edges_preserves_portals_turnouts_and_short_material_runs(self):
+        for kind in ('raised', 'lowered'):
+            network, _ = self.geometry.network(kind)
+            plan = self.terrain.sample(network, self.terrain.pose(0, 0, 0, 0),
+                                       lambda x, y: .65*x + .2*y)
+            source = self.terrain.apply(network, plan)
+            joined = self.terrain.joinShortEdges(source)
+            self.assertLess(len(joined), len(source))
+            def boundaries(edges):
+                materials, positions, degrees = {}, {}, {}
+                for edge in edges.values():
+                    for tag, point in ((edge.tag0, edge.p0), (edge.tag1, edge.p1)):
+                        materials.setdefault(tag, set()).add(edge.kind)
+                        positions[tag] = list(point.values())
+                        degrees[tag] = degrees.get(tag, 0) + 1
+                return {tag: positions[tag] for tag in positions
+                        if len(materials[tag]) > 1 or degrees[tag] != 2}
+            self.assertEqual(boundaries(source), boundaries(joined))
+        # A genuinely short bridge between ground tracks must not disappear.
+        edge = self.lua.table_from({'p0': [0, 0, 0], 'p1': [12, 0, 0],
+            't0': [12, 0, 0], 't1': [12, 0, 0], 'tag0': 'start', 'tag1': 'end'}, recursive=True)
+        source = self.terrain.apply(self.lua.table_from([edge]),
+            self.lua.table_from([[[0, .49, 1], [.49, .51, 2], [.51, 1, 1]]], recursive=True))
+        joined = self.terrain.joinShortEdges(source)
+        self.assertEqual(len(joined), 3)
+        self.assertEqual(joined[2].kind, 'BRIDGE')
+
 
 class PlacementTests(unittest.TestCase):
     def setUp(self):
@@ -164,24 +191,6 @@ class PlacementTests(unittest.TestCase):
           end
           assert(placement.checkPrepared({proposal={addedSegments={}}}))
         ''')
-
-    def test_simple_proposal_contains_same_transform_and_terrain_plan(self):
-        self.lua.execute('''
-          local function obj() return {} end
-          local api={type={SimpleProposal={new=obj,ConstructionEntity={new=obj}},
-            Vec4f={new=function(...) return {...} end}, Mat4f={new=function(...) return {...} end}},
-            engine={util={getPlayer=function() return 7 end,getYear=function() return 1944 end}}}
-          local matrix={0,1,0,0,-1,0,0,0,0,0,1,0,200,300,400,1}
-          local plan={{{0,1,2}},{{0,1,3}}}
-          local menu={trackType=2,bridgeType=3}
-          local proposal=placement.makeProposal(api,'loop.con',menu,matrix,plan)
-          local con=proposal.constructionsToAdd[1]
-          assert(con.params.xinTerrainPlan == plan and menu.xinTerrainPlan == nil)
-          assert(con.params.trackType == 2 and con.params.bridgeType == 3 and con.params.year == 1944)
-          assert(con.transf[4][1] == 200 and con.transf[4][2] == 300 and con.transf[4][3] == 400)
-          assert(con.playerEntity == 7)
-        ''')
-
 
 if __name__ == '__main__':
     unittest.main()

@@ -2,6 +2,8 @@ local react = ug_require "::/gui/main/react.lua"
 local builtin = ug_require "::/gui/main/builtin.lua"
 local entryPoint = ug_require "::/gui/main/mod_entry_point.tl"
 local constructionUtil = ug_require "::/gui/construction/construction_react_util.tl"
+local paramUtil = ug_require "::/scripts/construction/param_util.tl"
+local bridgeChoices = ug_require "xin_smooth_rail_loop_1::/rail_loop/bridge_choices.lua"
 local geometry = ug_require "xin_smooth_rail_loop_1::/rail_loop/prefab_geometry.lua"
 local terrainPlan = ug_require "xin_smooth_rail_loop_1::/rail_loop/terrain_plan.lua"
 local placement = ug_require "xin_smooth_rail_loop_1::/rail_loop/placement.lua"
@@ -79,6 +81,13 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
       return api.engine.terrain.getHeightAt(xy)
     end)
   end
+  local function makeProposal(values, matrix, plan)
+    local trackTypes = paramUtil.getRailTrackTypes(values.catenary == 2)
+    local index = math.max(1, math.min(#trackTypes, math.floor(tonumber(values.trackType) or 1)))
+    local segments = terrainPlan.joinShortEdges(terrainPlan.apply(networks[own[fileName]], plan))
+    return placement.makeProposal(api, segments, matrix,
+      values.streetTemplate or trackTypes[index], bridgeChoices.resource(values.bridgeTypeModern or values.bridgeType))
+  end
 
   react.onStep(function()
     if not alive() or session.busy then return end
@@ -108,7 +117,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
       session.lastPlanningError = nil
     end
     session.terrainPlan = plan
-    local ok, proposal = pcall(placement.makeProposal, api, fileName, values, matrix, plan)
+    local ok, proposal = pcall(makeProposal, values, matrix, plan)
     if not ok then
       preview:set(nil)
       setMessage("无法创建施工预览，请调整放置位置")
@@ -122,8 +131,9 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
     setMessage(planningError or "")
     if not session.plannedLogged then
       session.plannedLogged = true
-      log.message(string.format("[Rail Loop] proposal generated: %s; position=%.2f,%.2f,%.2f; previewOnly=%s",
-        own[fileName], matrix[13], matrix[14], matrix[15], tostring(planningError ~= nil)))
+      log.message(string.format("[Rail Loop] direct rail proposal: %s; nodes=%d; tracks=%d; position=%.2f,%.2f,%.2f; previewOnly=%s",
+        own[fileName], #proposal.streetProposal.nodesToAdd, #proposal.streetProposal.edgesToAdd,
+        matrix[13], matrix[14], matrix[15], tostring(planningError ~= nil)))
     end
   end)
 
@@ -223,13 +233,14 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
               local summary = tostring(allowed) .. "; " .. table.concat(errors, " | ")
               if session.overlayRevision ~= candidate.revision or session.overlaySummary ~= summary then
                 session.overlayRevision, session.overlaySummary = candidate.revision, summary
-                local drawn, edges = pcall(placement.previewEdges, api, builtin, data, prepared, allowed)
+                local drawn, edges, renderStats = pcall(placement.previewEdges, api, builtin, data, prepared, allowed)
                 if drawn then
                   -- Keep the ProposalData alive while its geometry is rendered.
                   overlay:set({ owner = session, revision = candidate.revision, edges = edges, source = data })
                   if not session.overlayLogged then
                     session.overlayLogged = true
-                    log.message("[Rail Loop] track overlay edges=" .. #edges)
+                    log.message(string.format("[Rail Loop] track overlay edges=%d; networks=%d; matched=%d; filtered=%d",
+                      #edges, renderStats.networks, renderStats.matched, renderStats.short))
                   end
                 elseif not session.overlayWarning then
                   session.overlayWarning = true
@@ -246,9 +257,15 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
                 for _, item in ipairs(data.collisionInfo and data.collisionInfo.collisionEntities or {}) do
                   collisions[#collisions + 1] = tostring(item.entity)
                 end
-                local details = string.format("[Rail Loop] native check: critical=%s; tracks=%s; maxGrade=%s; collisions=%s",
+                local details = string.format("[Rail Loop] native check: critical=%s; tracks=%s; maxGrade=%s; nodes=%s; duplicateNodes=%s; collisions=%s",
                   tostring(data.errorState.critical), tostring(stats and stats.count),
-                  tostring(stats and stats.maxGrade), table.concat(collisions, ","))
+                  tostring(stats and stats.maxGrade), tostring(stats and stats.nodes),
+                  tostring(stats and stats.duplicateNodes), table.concat(collisions, ","))
+                for _, name in ipairs({ "warnings", "infos" }) do
+                  local values = {}
+                  for _, value in ipairs(data.errorState[name] or {}) do values[#values + 1] = tostring(value) end
+                  details = details .. "; " .. name .. "=" .. table.concat(values, " | ")
+                end
                 if stats and stats.worst then
                   local e = stats.worst.comp
                   details = details .. string.format("; worst=%s; p0=%.5f,%.5f,%.5f; p1=%.5f,%.5f,%.5f; t0=%.5f,%.5f,%.5f; t1=%.5f,%.5f,%.5f",

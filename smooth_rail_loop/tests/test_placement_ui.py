@@ -7,6 +7,9 @@ from zipfile import ZipFile
 
 from lupa.lua52 import LuaRuntime
 
+from test_direct_proposal import add_rail_api
+from test_integration import PARAM_UTIL
+
 CONTENT = Path(__file__).resolve().parents[1] / 'content/rail_loop'
 GAME = Path(os.environ['TF3_GAME_DIR']) if os.environ.get('TF3_GAME_DIR') else None
 
@@ -77,7 +80,7 @@ util={getConstructionDefinitions=function() return defs end,
       getActionParams=function() return {constructionActionParams={constructionBuilder={}}} end}
 mouseValid=true;mouse={x=100,y=200,z=0}
 local function obj() return {} end
-api={type={SimpleProposal={new=obj,ConstructionEntity={new=obj}},Context={new=obj},LayerConfig={new=obj},
+api={type={Context={new=obj},LayerConfig={new=obj},
   Vec2f={new=function(x,y) return {x=x,y=y} end},
   Vec4f={new=function(...) return {...} end},Mat4f={new=function(...) return {...} end}},
   engine={terrain={isValidCoordinate=function() return true end,getHeightAt=function() return 0 end},
@@ -129,9 +132,8 @@ function press(definition)
   return false
 end
 function validate(root)
-  local prepared={proposal={addedSegments={{type=1,comp={
-    position0={x=0,y=0,z=0},position1={x=0,y=100,z=8},
-    tangent0={x=0,y=100,z=8},tangent1={x=0,y=100,z=8}}}}}}
+  local simple=find(root,'ProposalViewer')[1].params.simpleProposal
+  local prepared={proposal={addedSegments=simple.streetProposal.edgesToAdd,addedNodes=simple.streetProposal.nodesToAdd}}
   find(root,'ProposalViewer')[1].params.onCreateProposalData({costs=100,errorState={messages={},critical=false}},prepared)
 end
 '''
@@ -141,6 +143,7 @@ class PlacementUiTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
         self.lua.execute(GUI)
+        add_rail_api(self.lua)
         if GAME is not None:
             with ZipFile(GAME / 'base/content/gui.zip') as archive:
                 source = archive.read('gui/main/builtin.lua').decode('utf-8-sig')
@@ -185,8 +188,9 @@ class PlacementUiTests(unittest.TestCase):
             '::/gui/main/builtin.lua': self.lua.globals().builtin,
             '::/gui/main/mod_entry_point.tl': self.lua.table_from({'ModEntryPointExtension': 'entry'}),
             '::/gui/construction/construction_react_util.tl': self.lua.globals().util,
+            '::/scripts/construction/param_util.tl': self.lua.execute(PARAM_UTIL),
         }
-        for name in ('prefab_geometry.lua', 'terrain_plan.lua', 'placement.lua'):
+        for name in ('prefab_geometry.lua', 'terrain_plan.lua', 'placement.lua', 'bridge_choices.lua'):
             modules['xin_smooth_rail_loop_1::/rail_loop/' + name] = self.lua.execute((CONTENT / name).read_text(encoding='utf-8'))
         self.lua.globals().ug_require = lambda path: modules[path]
         self.lua.execute('originalAction=builtin.ConstructionAction;originalDescriptor=builtin.ActionDescriptor;originalParams=util.getActionParams')
@@ -233,9 +237,12 @@ class PlacementUiTests(unittest.TestCase):
           menu.height=5;menu.rotation=90;mouse.z=105;mouse.x=500
           root=render(defs[1]);step();root=render(defs[1])
           assert(bindings[defs[1].resName].key==key)
-          local con=find(root,'ProposalViewer')[1].params.simpleProposal.constructionsToAdd[1]
-          assert(con.transf[4][1]==500 and con.transf[4][3]==5)
-          assert(math.abs(con.transf[1][1])<1e-8 and math.abs(con.transf[1][2]+1)<1e-8)
+          local proposal=find(root,'ProposalViewer')[1].params.simpleProposal
+          assert(#proposal.constructionsToAdd==0)
+          local junction=proposal.streetProposal.nodesToAdd[1].comp.position
+          assert(junction.x==500 and junction.y==202.5 and junction.z==5)
+          local tangent=proposal.streetProposal.edgesToAdd[1].comp.tangent0
+          assert(tangent.x>0 and math.abs(tangent.y)<1e-8 and tangent.z==0)
           assert(menu.xinTerrainPlan==nil)
         ''')
 
@@ -245,6 +252,28 @@ class PlacementUiTests(unittest.TestCase):
           local replacement={resName=defs[1].resName,customAction=defs[1].customAction}
           render(replacement)
           assert(bindings[replacement.resName].key~=previous)
+        ''')
+
+    def test_native_track_catenary_bridge_controls_rebuild_direct_graph(self):
+        self.lua.execute('''
+          local root=render(defs[1]);step();root=render(defs[1])
+          local old=find(root,'ProposalViewer')[1].params
+          menu.trackType=2;menu.catenary=2;menu.bridgeType=3
+          step();root=render(defs[1])
+          local viewer=find(root,'ProposalViewer')[1].params
+          assert(viewer.proposalId~=old.proposalId)
+          local bridges=0
+          for _,edge in ipairs(viewer.simpleProposal.streetProposal.edgesToAdd) do
+            assert(edge.comp.roadTemplate=='::/infrastructure/track/standard/standard_catenary.street_template')
+            if edge.comp.type==api.type['enum'].BaseEdgeType.BRIDGE then
+              bridges=bridges+1;assert(edge.comp.typeIndex==17)
+            end
+          end
+          assert(bridges>0)
+          menu.bridgeTypeModern=1;step();root=render(defs[1])
+          for _,edge in ipairs(find(root,'ProposalViewer')[1].params.simpleProposal.streetProposal.edgesToAdd) do
+            if edge.comp.type==api.type['enum'].BaseEdgeType.BRIDGE then assert(edge.comp.typeIndex==23) end
+          end
         ''')
 
     def test_reactivation_without_menu_unmount_rejects_old_session_callbacks(self):
@@ -323,7 +352,7 @@ class PlacementUiTests(unittest.TestCase):
           mouse.x=mouse.x+1;step();root=render(defs[1]);validate(root)
           press();assert(commands==1)
           local logText=table.concat(diagnostics,'\\n')
-          assert(logText:find('proposal generated',1,true))
+          assert(logText:find('direct rail proposal',1,true))
           assert(logText:find('proposal viewer attached',1,true))
           assert(logText:find('proposal checked: allowed=true',1,true))
         ''')

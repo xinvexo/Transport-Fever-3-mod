@@ -155,4 +155,61 @@ function M.equal(a, b)
   return true
 end
 
+-- Terrain crossings can sit centimetres from an existing curve division.
+-- Remove that redundant division inside one material; never move a portal,
+-- merge different materials, or remove a turnout. Refit only if geometry
+-- stays within 15 mm of the original and retains native radius/grade limits.
+function M.joinShortEdges(segments)
+  local result, degree = {}, {}
+  for i, edge in ipairs(segments) do
+    result[i] = edge
+    degree[edge.tag0] = (degree[edge.tag0] or 0) + 1
+    degree[edge.tag1] = (degree[edge.tag1] or 0) + 1
+  end
+  local function length(edge)
+    return (math.sqrt(edge.t0[1]^2 + edge.t0[2]^2) + math.sqrt(edge.t1[1]^2 + edge.t1[2]^2)) / 2
+  end
+  local function join(a, b)
+    if a.tag1 ~= b.tag0 or degree[a.tag1] ~= 2 or a.kind ~= b.kind or a.route ~= b.route then return nil end
+    local la, lb = length(a), length(b)
+    if math.min(la, lb) >= 3 or la + lb > 24 then return nil end
+    local fraction, total = la / (la + lb), la + lb
+    local edge = { p0 = a.p0, p1 = b.p1, t0 = {}, t1 = {}, kind = a.kind, route = a.route,
+      tag0 = a.tag0, tag1 = b.tag1, snap0 = a.snap0, snap1 = b.snap1 }
+    for j = 1, 3 do edge.t0[j], edge.t1[j] = a.t0[j]*total/la, b.t1[j]*total/lb end
+    for side, original in ipairs({ a, b }) do
+      for i = 0, 32 do
+        local v = i / 32
+        local u = side == 1 and v*fraction or fraction + v*(1-fraction)
+        local p, t = M.point(edge, u)
+        local before = M.point(original, v)
+        local distance = 0
+        for j = 1, 3 do distance = distance + (p[j]-before[j])^2 end
+        if distance > .015^2 then return nil end
+        local speed = math.sqrt(t[1]^2 + t[2]^2)
+        if speed < 1e-6 or math.abs(t[3])/speed > .085 then return nil end
+        local second = {}
+        for j = 1, 2 do
+          second[j] = (12*u-6)*edge.p0[j] + (6*u-4)*edge.t0[j]
+            + (-12*u+6)*edge.p1[j] + (6*u-2)*edge.t1[j]
+        end
+        if math.abs(t[1]*second[2]-t[2]*second[1]) > speed^3/55 then return nil end
+      end
+    end
+    return edge
+  end
+  local i = 1
+  while i < #result do
+    local combined = join(result[i], result[i+1])
+    if combined then
+      result[i] = combined
+      table.remove(result, i+1)
+      i = math.max(1, i-1)
+    else
+      i = i+1
+    end
+  end
+  return result
+end
+
 return M
