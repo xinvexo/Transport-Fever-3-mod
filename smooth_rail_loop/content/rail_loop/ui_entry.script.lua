@@ -26,6 +26,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
   local holder = react.useRef({ active = false })
   local model = holder:get()
   local preview = react.useState(nil)
+  local overlay = react.useState(nil)
   local message = react.useState(nil)
   local fileName = params.definition.resName
   local networks = react.useRef({}):get()
@@ -45,7 +46,12 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
       and session ~= nil and session.live and props:get().isActive
   end
   local function setMessage(text)
-    if alive() then message:set({ owner = session, text = text }) end
+    if alive() then
+      local previous = message:old()
+      if not previous or previous.owner ~= session or previous.text ~= text then
+        message:set({ owner = session, text = text })
+      end
+    end
   end
   local function pose()
     if not alive() or not api.gui.mouse.hasTerrainPosition() then return nil end
@@ -207,7 +213,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
             local errors = {}
             if candidate.planningError then errors[#errors + 1] = candidate.planningError end
             for _, value in ipairs(data.errorState.messages or {}) do errors[#errors + 1] = tostring(value) end
-            local ok, issue = pcall(placement.checkPrepared, prepared)
+            local ok, issue, stats = pcall(placement.checkPrepared, prepared)
             if not ok then issue = "无法检查施工预览" end
             if issue then errors[#errors + 1] = issue end
             local balance = api.engine.util.finance.getPlayersBalance(api.engine.util.getPlayer())
@@ -215,15 +221,52 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
             local allowed = not data.errorState.critical and #errors == 0
             if session:validated(candidate.revision, prepared, allowed) then
               local summary = tostring(allowed) .. "; " .. table.concat(errors, " | ")
+              if session.overlayRevision ~= candidate.revision or session.overlaySummary ~= summary then
+                session.overlayRevision, session.overlaySummary = candidate.revision, summary
+                local drawn, edges = pcall(placement.previewEdges, api, builtin, data, prepared, allowed)
+                if drawn then
+                  -- Keep the ProposalData alive while its geometry is rendered.
+                  overlay:set({ owner = session, revision = candidate.revision, edges = edges, source = data })
+                  if not session.overlayLogged then
+                    session.overlayLogged = true
+                    log.message("[Rail Loop] track overlay edges=" .. #edges)
+                  end
+                elseif not session.overlayWarning then
+                  session.overlayWarning = true
+                  log.warning("[Rail Loop] track overlay: " .. tostring(edges))
+                end
+              end
               if session.lastCheckSummary ~= summary then
                 session.lastCheckSummary = summary
                 log.message("[Rail Loop] proposal checked: allowed=" .. summary)
+              end
+              if not allowed and (session.detailsLogged or 0) < 3 then
+                session.detailsLogged = (session.detailsLogged or 0) + 1
+                local collisions = {}
+                for _, item in ipairs(data.collisionInfo and data.collisionInfo.collisionEntities or {}) do
+                  collisions[#collisions + 1] = tostring(item.entity)
+                end
+                local details = string.format("[Rail Loop] native check: critical=%s; tracks=%s; maxGrade=%s; collisions=%s",
+                  tostring(data.errorState.critical), tostring(stats and stats.count),
+                  tostring(stats and stats.maxGrade), table.concat(collisions, ","))
+                if stats and stats.worst then
+                  local e = stats.worst.comp
+                  details = details .. string.format("; worst=%s; p0=%.5f,%.5f,%.5f; p1=%.5f,%.5f,%.5f; t0=%.5f,%.5f,%.5f; t1=%.5f,%.5f,%.5f",
+                    tostring(stats.worst.entity), e.position0.x,e.position0.y,e.position0.z,
+                    e.position1.x,e.position1.y,e.position1.z,e.tangent0.x,e.tangent0.y,e.tangent0.z,
+                    e.tangent1.x,e.tangent1.y,e.tangent1.z)
+                end
+                log.message(details)
               end
               errors[#errors + 1] = _("Cost:") .. " " .. api.util.formatMoney(data.costs)
               setMessage(table.concat(errors, "\n"))
             end
           end,
         }
+      end
+      local trackOverlay = overlay:old()
+      if trackOverlay and trackOverlay.owner == session and trackOverlay.revision == session.revision and #trackOverlay.edges > 0 then
+        children[#children + 1] = builtin.EdgeRenderable { edges = trackOverlay.edges, ignoreDepth = true }
       end
       local tooltip = message:old()
       if tooltip and tooltip.owner == session and tooltip.text ~= "" then

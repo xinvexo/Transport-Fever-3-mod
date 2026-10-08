@@ -55,6 +55,7 @@ react={useRef=slot,useState=slot,
 local allowed={Component={},BoxLayout={children=true,orientation=true},TextView={text=true,meta=true},
   Selector={filter=true,onProcessMouseEvent=true},
   ProposalViewer={simpleProposal=true,proposalId=true,entityForRefundableContext=true,onCreateProposalData=true},
+  EdgeRenderable={edges=true,ignoreDepth=true},
   LayerConfig={config=true},ActionTooltip={recipe=true,param=true},ActionDescriptor={children=true,onBack=true,tool=true}}
 function declareBuiltin(name)
   return function(params)
@@ -171,6 +172,14 @@ class PlacementUiTests(unittest.TestCase):
               return {''' + ','.join(hook_source) + '}')
             for name in names:
                 self.lua.globals().react[name] = hooks[name]
+        self.lua.execute('''
+          builtin.type=builtin.type or {}
+          builtin.type.EdgeRenderable=builtin.type.EdgeRenderable or {}
+          builtin.type.EdgeRenderable.Edge={new=function(geometry)
+            assert(geometry.native,'Renderer must reuse native geometry')
+            return {edgeGeometry=geometry}
+          end}
+        ''')
         modules = {
             '::/gui/main/react.lua': self.lua.globals().react,
             '::/gui/main/builtin.lua': self.lua.globals().builtin,
@@ -328,6 +337,26 @@ class PlacementUiTests(unittest.TestCase):
           assert(#find(root,'ProposalViewer')==1)
           assert(find(root,'ActionTooltip')[1].params.param.text:find('碰撞',1,true))
           press();assert(commands==0)
+        ''')
+
+    def test_rejected_native_tracks_get_red_overlay_without_extra_proposal_viewer(self):
+        self.lua.execute('''
+          local root=render(defs[1]);step();root=render(defs[1])
+          local geom={native=true,length=100}
+          local prepared={proposal={addedSegments={{entity=-1,type=1,comp={
+            position0={x=0,y=0,z=0},position1={x=0,y=100,z=0},
+            tangent0={x=0,y=100,z=0},tangent1={x=0,y=100,z=0}}}}}}
+          local data={costs=0,errorState={critical=true,messages={'无法建造'}},
+            entity2tn={[-1]={edges={{geometry=geom}}}}}
+          find(root,'ProposalViewer')[1].params.onCreateProposalData(data,prepared)
+          root=render(defs[1])
+          assert(#find(root,'ProposalViewer')==1)
+          local overlay=find(root,'EdgeRenderable')[1].params
+          assert(overlay.ignoreDepth and #overlay.edges==1)
+          assert(overlay.edges[1].edgeGeometry==geom and overlay.edges[1].colors[1][1]==1)
+          press();assert(commands==0)
+          mouse.x=mouse.x+2;step();root=render(defs[1])
+          assert(#find(root,'EdgeRenderable')==0, 'Old location must not keep its overlay')
         ''')
 
 

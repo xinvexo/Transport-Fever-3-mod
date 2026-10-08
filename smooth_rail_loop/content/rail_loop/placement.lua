@@ -24,10 +24,10 @@ end
 -- Verify the native prepared world curves as well as the Lua design curves.
 function M.checkPrepared(proposal)
   if not proposal or not proposal.proposal then return "无法读取施工预览" end
-  local count = 0
+  local stats = { count = 0, maxGrade = 0 }
   for _, edge in ipairs(proposal.proposal.addedSegments) do
     if edge.type == 1 then
-      count = count + 1
+      stats.count = stats.count + 1
       local s = edge.comp
       for i = 0, 64 do
         local u = i / 64
@@ -37,13 +37,41 @@ function M.checkPrepared(proposal)
             + (-6*u*u+6*u)*s.position1[axis] + (3*u*u-2*u)*s.tangent1[axis]
         end
         local horizontal = math.sqrt(velocity.x^2 + velocity.y^2)
-        if horizontal < 1e-6 or math.abs(velocity.z) / horizontal > .0851 then
-          return "施工处理后的轨道坡度过大，请调整放置位置或高度"
+        local grade = horizontal < 1e-6 and math.huge or math.abs(velocity.z) / horizontal
+        if grade ~= grade then grade = math.huge end
+        if grade > stats.maxGrade then
+          stats.maxGrade = grade
+          stats.worst = edge
         end
       end
     end
   end
-  if count == 0 then return "施工预览未生成轨道" end
+  if stats.count == 0 then return "施工预览未生成轨道", stats end
+  if stats.maxGrade > .0851 then return "施工处理后的轨道坡度过大，请调整放置位置或高度", stats end
+  return nil, stats
+end
+
+-- Reuse native transport-network geometry, never reconstruct undocumented
+-- renderer splines. This line overlay can show a rejected construction too.
+function M.previewEdges(api, builtin, data, proposal, allowed)
+  local result = {}
+  if not proposal or not proposal.proposal or not data.entity2tn then return result end
+  local color = allowed and api.type.Vec4f.new(.20, .65, 1, 1) or api.type.Vec4f.new(1, .25, .18, 1)
+  for _, segment in ipairs(proposal.proposal.addedSegments) do
+    local network = segment.type == 1 and data.entity2tn[segment.entity]
+    if network then
+      for _, edge in ipairs(network.edges or {}) do
+        local geometry = edge.geometry
+        if geometry and geometry.length >= 2 and geometry.length < math.huge then
+          local render = builtin.type.EdgeRenderable.Edge.new(geometry)
+          render.colors = { color, color }
+          render.width, render.offsetZ, render.stepSize = 1.5, .15, 1
+          result[#result + 1] = render
+        end
+      end
+    end
+  end
+  return result
 end
 
 -- A candidate can only be committed after validation of that exact revision.

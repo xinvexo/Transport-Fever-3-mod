@@ -177,7 +177,7 @@ class PrefabResourceTests(unittest.TestCase):
                 for group in groups:
                     self.assertEqual(group.type, 'TRACK')
                     self.assertEqual(group.alignTerrain, group.edgeType is None)
-                    self.assertEqual(list(group.freeNodes.values()), list(range(len(group.edges))))
+                    self.assertEqual(len(group.freeNodes), 0, 'Prefab rail geometry must stay construction-owned')
                     for index in group.snapNodes.values():
                         self.assertGreaterEqual(index, 0)
                         self.assertLess(index, len(group.edges))

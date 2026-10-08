@@ -40,6 +40,7 @@ class TerrainTests(unittest.TestCase):
                     self.assertEqual(sum(len(g.snapNodes) for g in result.edgeLists.values()), 4)
                     for group in result.edgeLists.values():
                         self.assertEqual(group.alignTerrain, group.edgeType is None)
+                        self.assertEqual(len(group.freeNodes), 0)
 
     def test_world_transform_is_used_and_saved_plan_needs_no_live_terrain(self):
         edges, _ = self.geometry.network('raised')

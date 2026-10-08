@@ -39,8 +39,9 @@ function data()
         local nodeIndex = #group.edges
         group.edges[nodeIndex + 1] = { segment.p0, segment.t0, segment.tag0 }
         group.edges[nodeIndex + 2] = { segment.p1, segment.t1, segment.tag1 }
-        group.freeNodes[#group.freeNodes + 1] = nodeIndex
-        group.freeNodes[#group.freeNodes + 1] = nodeIndex + 1
+        -- Native rail modules keep their internal geometry construction-owned.
+        -- The four snap endpoints remain connectable without freeing the
+        -- turnout and transition nodes for independent graph cleanup.
         if segment.snap0 then group.snapNodes[#group.snapNodes + 1] = nodeIndex end
         if segment.snap1 then group.snapNodes[#group.snapNodes + 1] = nodeIndex + 1 end
       end
