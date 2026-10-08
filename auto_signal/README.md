@@ -13,7 +13,3 @@
 同向旧信号灯会被统一替换，新灯沿用本次放置的型号、朝向和单向属性；反向信号灯及其他轨道对象保留。实际间距可能大于设定值。关闭“自动布置”可恢复手动放置。
 
 区段遇到道岔、结构所属轨道或末端停止，也支持无分支环线。位置不允许建造时会尝试调整，建造失败保留原灯。
-
-**请勿与 Automatic Signal Spacing 同时启用。** 当前版本尚未完成游戏内验证。
-
-参考：SynixeBrett 的 [Automatic Signal Spacing](https://mod.io/g/transportfever3/m/automatic-signal-spacing)。
