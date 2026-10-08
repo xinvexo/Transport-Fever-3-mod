@@ -49,7 +49,7 @@ react={useRef=slot,useState=slot,
   end,
   RegisterPluginRecipe=function(_,_,fn) return fn end}
 local allowed={
-  Component={},FloatingLayout={children=true},TextView={text=true,meta=true},
+  Component={},BoxLayout={children=true,orientation=true},FloatingLayout={children=true},TextView={text=true,meta=true},
   Selector={filter=true,stopOnMenuBack=true,onProcessMouseEvent=true},
   ProposalViewer={simpleProposal=true,proposalId=true,entityForRefundableContext=true,onCreateProposalData=true},
   ActionTooltip={recipe=true,param=true},ActionDescriptor={children=true,onBack=true,tool=true}}
@@ -106,6 +106,14 @@ function find(node,kind,result)
   return result
 end
 function step() steps.XinRailLoopTerrainPlacement() end
+function visualRecipe(recipe,params)
+  local result=recipe(params)
+  -- ConstructionDefinitionItem embeds customAction in its BoxLayout;
+  -- ActionTooltip also expects the visual recipe to provide a layout root.
+  assert(result and (result.kind=='BoxLayout' or result.kind=='FloatingLayout'),
+    'Recipe child must be a layout')
+  return result
+end
 function press(id)
   local handler=inputConfigs.XinRailLoopLifecycle[id]
   assert(handler,'Missing input action: '..id)
@@ -188,6 +196,32 @@ class PlacementUiTests(unittest.TestCase):
           assert(#find(root,'FloatingLayout')==0)
           press('constructOpt1')
           assert(nativeKeys==1)
+        ''')
+
+    def test_menu_visual_slot_requires_layout_when_active_and_inactive(self):
+        self.lua.execute('''
+          local definition=defs[1]
+          local bad=pcall(visualRecipe,function() return builtin.Component{} end,{})
+          assert(not bad, 'A bare component must reproduce the reported layout failure')
+          for _,active in ipairs({false,true}) do
+            local layout=visualRecipe(definition.customAction.recipe,
+              {definition=definition,isActive=active,abort=function() aborted=aborted+1 end})
+            assert(#layout.params.children==0)
+          end
+        ''')
+
+    def test_cost_and_error_tooltip_visual_slot_requires_layout(self):
+        self.lua.execute('''
+          local root=render(defs[1]);step();root=render(defs[1]);validate(root)
+          root=render(defs[1])
+          local tooltip=find(root,'ActionTooltip')[1].params
+          local layout=visualRecipe(tooltip.recipe,tooltip.param)
+          assert(#find(layout,'TextView')==1)
+          find(root,'ProposalViewer')[1].params.onCreateProposalData(
+            {costs=0,errorState={critical=true,messages={'无法建造'}}},nil)
+          root=render(defs[1]);tooltip=find(root,'ActionTooltip')[1].params
+          layout=visualRecipe(tooltip.recipe,tooltip.param)
+          assert(find(layout,'TextView')[1].params.text:find('无法建造',1,true))
         ''')
 
     def test_no_pointer_no_build_and_stale_preview_after_rotation_cannot_apply(self):

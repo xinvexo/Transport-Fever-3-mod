@@ -60,11 +60,14 @@ local Lifecycle = react.RegisterRecipe("XinRailLoopLifecycle", function(params)
   react.onUnmount(function()
     if controllers[params.definition.resName] == params then controllers[params.definition.resName] = nil end
   end)
-  return builtin.Component{}
+  -- ConstructionDefinitionItem embeds this recipe in a visual layout slot.
+  return builtin.BoxLayout { children = {} }
 end)
 
 local Tooltip = react.RegisterRecipe("XinRailLoopTooltip", function(params)
-  return builtin.TextView { text = params.text, meta = { class = "font-scale-body" } }
+  return builtin.BoxLayout {
+    children = { builtin.TextView { text = params.text, meta = { class = "font-scale-body" } } },
+  }
 end)
 
 local Action = react.RegisterRecipe("XinRailLoopTerrainPlacement", function(params)
