@@ -2,13 +2,13 @@
 
 《狂热运输 3》模组集合。
 
-| 目录 | 模组 | 功能 |
-| --- | --- | --- |
-| [auto_alternatives](auto_alternatives/README.md) | 自动备用站台 | 为新停靠站和扩建站台补选备用位置 |
-| [auto_signal](auto_signal/README.md) | 自适应铁路信号灯 | 按设定间距自动布置信号灯 |
-| [station_rows](station_rows/README.md) | 车站整列配置 | 按住 Shift 整列增删车站模块 |
-| [tidy_fields](tidy_fields/README.md) | 工厂地块规整 | 按方向整理地块，并开放新建产业的完整成长上限 |
-| [smooth_rail_loop](smooth_rail_loop/README.md) | 两点铁路回环 | 选择两条轨道上的连接点生成回环（开发中） |
+| 目录 | 模组 | 功能 | 状态 |
+| --- | --- | --- | --- |
+| [auto_alternatives](auto_alternatives/README.md) | 自动备用站台 | 为新停靠站和扩建站台补选备用位置 | 开发完成 |
+| [auto_signal](auto_signal/README.md) | 自适应铁路信号灯 | 按设定间距自动布置信号灯 | 开发完成 |
+| [station_rows](station_rows/README.md) | 车站整列配置 | 按住 Shift 整列增删车站模块 | 开发完成 |
+| [tidy_fields](tidy_fields/README.md) | 工厂地块规整 | 按方向整理地块，并开放新建产业的完整成长上限 | 开发完成 |
+| [smooth_rail_loop](smooth_rail_loop/README.md) | 两点铁路回环 | 选择两条轨道上的连接点生成回环 | 开发中 |
 
 ## 安装
 
