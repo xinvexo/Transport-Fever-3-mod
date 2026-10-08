@@ -1,4 +1,4 @@
--- Compact prefab geometry. Legacy geometry.lua remains unchanged for saved constructions.
+-- Compact prefab geometry.
 -- Both main-line connections stay at the placement height and 5 m apart.
 local geometry = {}
 local pi = math.pi

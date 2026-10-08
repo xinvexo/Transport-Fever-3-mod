@@ -57,7 +57,9 @@ class PrefabResourceTests(unittest.TestCase):
 
     def test_two_prefabs_enable_native_rail_constructions_category(self):
         visible = []
-        for path in sorted(CONTENT.glob('*.con.lua')):
+        constructions = sorted(CONTENT.glob('*.con.lua'))
+        self.assertEqual([path.name for path in constructions], ['lowered_loop.con.lua', 'raised_loop.con.lua'])
+        for path in constructions:
             definition = self.resource(path.name)
             for category in definition.menuCategory.categories.values():
                 self.assertEqual(category.category, 'rail_constructions')
@@ -71,6 +73,7 @@ class PrefabResourceTests(unittest.TestCase):
             self.assertEqual(definition.availability.yearFrom, 0)
             self.assertTrue(definition.heightAdjustable)
             self.assertEqual(definition.undergroundView, kind == 'lowered')
+            self.assertEqual(definition.description.previewIcon, definition.description.icon)
             self.assertEqual([p.key for p in definition.params.values()], ['trackType', 'trackType', 'catenary'])
             self.assertTrue(definition.configureHudIconsScript.fileName.endswith('@configureTrackConstructionHudIconsFn'))
         self.assertFalse(list(CONTENT.glob('dynamic_*')))
@@ -118,16 +121,6 @@ class PrefabResourceTests(unittest.TestCase):
                 np.testing.assert_allclose(snap_positions, [[-2.5, 0, 0], [2.5, 0, 0]], atol=1e-8)
                 self.assertEqual(groups[1].edgeTypeName, '::/infrastructure/bridge/stone.bridge' if kind == 'raised'
                                  else '::/infrastructure/tunnel/tunnel_a.tunnel')
-
-    def test_legacy_saved_construction_still_loads_with_original_parameters(self):
-        definition = self.resource('loop.con.lua')
-        self.assertEqual(len(definition.menuCategory.categories), 0)
-        self.assertEqual(definition.updateScript.fileName, 'loop.script@updateFn')
-        self.assertEqual(list(definition.updateScript.params.radii.values()), [160, 200, 240, 320, 400, 500])
-        result = self.resource('loop.script.lua').updateFn(definition.updateScript.params, self.lua.table())
-        points = [list(endpoint[1].values()) for group in result.edgeLists.values() for endpoint in group.edges.values()]
-        self.assertAlmostEqual(max(p[0] for p in points)-min(p[0] for p in points), 480, delta=1)
-        self.assertTrue(all(p[2] == 0 for p in points))
 
     @unittest.skipUnless(GAME is not None and (GAME / 'base/content/gui.zip').is_file(), 'set TF3_GAME_DIR for native resource checks')
     def test_native_category_icons_and_bridge_tunnel_resources_exist(self):

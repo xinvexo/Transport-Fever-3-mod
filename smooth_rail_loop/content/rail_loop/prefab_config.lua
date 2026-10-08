@@ -19,7 +19,7 @@ function M.definition(kind)
   return {
     description = {
       name = variant.name, description = variant.description,
-      icon = variant.icon, previewIcon = "loop_preview.tga",
+      icon = variant.icon, previewIcon = variant.icon,
     },
     availability = { yearFrom = 0, yearTo = 0 },
     menuCategory = { categories = { { category = "rail_constructions", order = variant.order } } },
