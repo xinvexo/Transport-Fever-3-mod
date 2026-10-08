@@ -8,7 +8,6 @@
 | [auto_signal](auto_signal/README.md) | 自适应铁路信号灯 | 按设定间距自动布置信号灯 | 开发完成 |
 | [station_rows](station_rows/README.md) | 车站整列配置 | 按住 Shift 整列增删车站模块 | 开发完成 |
 | [tidy_fields](tidy_fields/README.md) | 工厂地块规整 | 按方向整理地块，并开放新建产业的完整成长上限 | 开发完成 |
-| [smooth_rail_loop](smooth_rail_loop/README.md) | 铁路回环 | 高架与地下两种铁路回环预制件 | 开发中 |
 
 ## 安装
 
