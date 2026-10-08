@@ -176,10 +176,24 @@ class PlacementUiTests(unittest.TestCase):
             for name in names:
                 self.lua.globals().react[name] = hooks[name]
         self.lua.execute('''
+          local function strict(keys)
+            local values={}
+            return setmetatable({}, {__index=values,__newindex=function(_,k,v)
+              assert(keys[k], 'Undeclared geometry field: '..k);values[k]=v
+            end})
+          end
+          api.type.EdgeGeometry={
+            Type={CUBIC_SPLINE='cubic'},
+            CubicSpline={new=function() return strict{pos=true,tangent=true} end},
+            new=function() return strict{type=true,cubicSpline=true,height=true,tangent=true,length=true,width=true} end}
           builtin.type=builtin.type or {}
           builtin.type.EdgeRenderable=builtin.type.EdgeRenderable or {}
           builtin.type.EdgeRenderable.Edge={new=function(geometry)
-            assert(geometry.native,'Renderer must reuse native geometry')
+            if not geometry.native then
+              assert(geometry.type=='cubic' and geometry.length>=2 and geometry.width>0)
+              assert(#geometry.cubicSpline.pos==2 and #geometry.cubicSpline.tangent==2)
+              assert(geometry.height.x and geometry.height.y and geometry.tangent.x and geometry.tangent.y)
+            end
             return {edgeGeometry=geometry}
           end}
         ''')
@@ -190,7 +204,8 @@ class PlacementUiTests(unittest.TestCase):
             '::/gui/construction/construction_react_util.tl': self.lua.globals().util,
             '::/scripts/construction/param_util.tl': self.lua.execute(PARAM_UTIL),
         }
-        for name in ('prefab_geometry.lua', 'terrain_plan.lua', 'placement.lua', 'bridge_choices.lua'):
+        for name in ('prefab_geometry.lua', 'terrain_plan.lua', 'placement.lua', 'bridge_choices.lua',
+                     'preview.lua', 'proposal_diagnostics.lua'):
             modules['xin_smooth_rail_loop_1::/rail_loop/' + name] = self.lua.execute((CONTENT / name).read_text(encoding='utf-8'))
         self.lua.globals().ug_require = lambda path: modules[path]
         self.lua.execute('originalAction=builtin.ConstructionAction;originalDescriptor=builtin.ActionDescriptor;originalParams=util.getActionParams')
@@ -385,7 +400,83 @@ class PlacementUiTests(unittest.TestCase):
           assert(overlay.edges[1].edgeGeometry==geom and overlay.edges[1].colors[1][1]==1)
           press();assert(commands==0)
           mouse.x=mouse.x+2;step();root=render(defs[1])
-          assert(#find(root,'EdgeRenderable')==0, 'Old location must not keep its overlay')
+          assert(#find(root,'EdgeRenderable')==1)
+          assert(find(root,'EdgeRenderable')[1].params.edges[1].edgeGeometry~=geom,
+            'The independent design must replace the old native geometry on cursor movement')
+        ''')
+
+    def test_design_visible_before_validation_and_when_engine_returns_no_network(self):
+        self.lua.execute('''
+          for _,definition in ipairs({defs[1],defs[2]}) do
+            local root=render(definition);step(definition);root=render(definition)
+            assert(#find(root,'ProposalViewer')==1 and #find(root,'EdgeRenderable')==1)
+            local pending=find(root,'EdgeRenderable')[1].params
+            assert(pending.ignoreDepth and #pending.edges>=62)
+            assert(pending.edges[1].colors[1][1]==.2)
+            local viewer=find(root,'ProposalViewer')[1].params
+            local simple=viewer.simpleProposal.streetProposal
+            viewer.onCreateProposalData({costs=0,errorState={critical=true,messages={'无法建造'}},entity2tn={}},
+              {proposal={addedSegments=simple.edgesToAdd,addedNodes=simple.nodesToAdd}})
+            root=render(definition)
+            assert(#find(root,'ProposalViewer')==1 and #find(root,'EdgeRenderable')==1)
+            local rejected=find(root,'EdgeRenderable')[1].params
+            assert(#rejected.edges==#pending.edges and rejected.edges[1].colors[1][1]==1)
+            assert(rejected.edges[1].edgeGeometry==pending.edges[1].edgeGeometry)
+            press(definition);assert(commands==0)
+          end
+        ''')
+
+    def test_design_survives_proposal_creation_failure_and_clears_on_cancel(self):
+        self.lua.execute('''
+          api.res.streetTemplateRep.find=function() return -1 end
+          local root=render(defs[1]);step();root=render(defs[1])
+          assert(#find(root,'ProposalViewer')==0 and #find(root,'EdgeRenderable')==1)
+          press();assert(commands==0)
+          local oldAction=bindings[defs[1].resName].fn
+          root.params.onBack();assert(#oldAction().params.children==0)
+        ''')
+
+    def test_independent_curves_follow_world_pose_without_translating_tangents(self):
+        self.lua.execute('''
+          menu.height=25;menu.rotation=90;mouse.x=500
+          for _,definition in ipairs({defs[1],defs[2]}) do
+            local root=render(definition);step(definition);root=render(definition)
+            local curves=find(root,'EdgeRenderable')[1].params.edges
+            local first=curves[1].edgeGeometry
+            assert(math.abs(first.cubicSpline.pos[1].x-500)<1e-6)
+            assert(math.abs(first.cubicSpline.pos[1].y-202.5)<1e-6)
+            assert(first.height.x==25 and first.height.y==25)
+            assert(math.abs(first.cubicSpline.tangent[1].x-4)<1e-6)
+            assert(math.abs(first.cubicSpline.tangent[1].y)<1e-6)
+            local extreme=25
+            for _,edge in ipairs(curves) do
+              local g=edge.edgeGeometry
+              extreme=definition==defs[1] and math.max(extreme,g.height.x,g.height.y)
+                or math.min(extreme,g.height.x,g.height.y)
+            end
+            assert(math.abs(extreme-(definition==defs[1] and 41 or 13))<1e-6)
+          end
+        ''')
+
+    def test_early_rejection_schedules_bounded_read_only_checks(self):
+        self.lua.execute('''
+          checks=0
+          api.engine.util.proposal={makeProposalData=function(simple,context)
+            assert(context.player==7)
+            assert(#simple.streetProposal.edgesToAdd>0)
+            checks=checks+1
+            -- Runtime signatures can wrap ProposalData in a tuple.
+            return {{errorState={critical=true,messages={'blocked'}},entity2tn={}}}
+          end}
+          local root=render(defs[1]);step();root=render(defs[1])
+          local callback=find(root,'ProposalViewer')[1].params.onCreateProposalData
+          callback({costs=0,errorState={critical=true,messages={'无法建造'}},entity2tn={}},nil)
+          for i=1,6 do step();assert(checks==i and commands==0) end
+          step();assert(checks==6)
+          callback({costs=0,errorState={critical=true,messages={'无法建造'}},entity2tn={}},nil)
+          step();assert(checks==6 and commands==0)
+          local text=table.concat(diagnostics,'\\n')
+          assert(text:find('probe straight-index0',1,true) and text:find('probe full-original',1,true))
         ''')
 
 

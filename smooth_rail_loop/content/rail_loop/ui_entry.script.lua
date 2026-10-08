@@ -7,12 +7,15 @@ local bridgeChoices = ug_require "xin_smooth_rail_loop_1::/rail_loop/bridge_choi
 local geometry = ug_require "xin_smooth_rail_loop_1::/rail_loop/prefab_geometry.lua"
 local terrainPlan = ug_require "xin_smooth_rail_loop_1::/rail_loop/terrain_plan.lua"
 local placement = ug_require "xin_smooth_rail_loop_1::/rail_loop/placement.lua"
+local designPreview = ug_require "xin_smooth_rail_loop_1::/rail_loop/preview.lua"
+local proposalDiagnostics = ug_require "xin_smooth_rail_loop_1::/rail_loop/proposal_diagnostics.lua"
 
 local own = {
   ["xin_smooth_rail_loop_1::/rail_loop/raised_loop.con"] = "raised",
   ["xin_smooth_rail_loop_1::/rail_loop/lowered_loop.con"] = "lowered",
 }
 local nextProposalId = 0
+local diagnosed = {}
 
 local Tooltip = react.RegisterRecipe("XinRailLoopTooltip", function(params)
   return builtin.BoxLayout {
@@ -85,12 +88,20 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
     local trackTypes = paramUtil.getRailTrackTypes(values.catenary == 2)
     local index = math.max(1, math.min(#trackTypes, math.floor(tonumber(values.trackType) or 1)))
     local segments = terrainPlan.joinShortEdges(terrainPlan.apply(networks[own[fileName]], plan))
-    return placement.makeProposal(api, segments, matrix,
-      values.streetTemplate or trackTypes[index], bridgeChoices.resource(values.bridgeTypeModern or values.bridgeType))
+    local trackName = values.streetTemplate or trackTypes[index]
+    local bridgeName = bridgeChoices.resource(values.bridgeTypeModern or values.bridgeType)
+    return placement.makeProposal(api, segments, matrix, trackName, bridgeName),
+      { segments=segments, matrix=matrix, trackName=trackName, bridgeName=bridgeName }
   end
 
   react.onStep(function()
     if not alive() or session.busy then return end
+    if session.diagnostics then
+      local ok, more, line = pcall(session.diagnostics, api)
+      if ok and line then log.message(line) end
+      if not ok then log.warning("[Rail Loop] diagnostic: " .. tostring(more)) end
+      if not ok or not more then session.diagnostics = nil end
+    end
     local key, matrix, values = pose()
     if not key then
       if session.key then session:replace(nil, nil); preview:set(nil); setMessage("") end
@@ -98,6 +109,24 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
     end
     if key == session.key then return end
     session:replace(key, nil)
+    networks[own[fileName]] = networks[own[fileName]] or geometry.network(own[fileName])
+    local drawn, design, edges = pcall(function()
+      local curves = designPreview.geometry(api, networks[own[fileName]], matrix)
+      return curves, designPreview.edges(api, builtin, curves)
+    end)
+    if drawn then
+      overlay:set({ owner=session, revision=session.revision, edges=edges, source=design })
+      if not session.designLogged then
+        session.designLogged = true
+        log.message("[Rail Loop] independent preview curves=" .. #edges)
+      end
+    else
+      if not session.designWarning then
+        session.designWarning = true
+        log.warning("[Rail Loop] independent preview: " .. tostring(design))
+      end
+      design = nil
+    end
     local sampled, plan = pcall(sample, matrix)
     local planningError
     if not sampled then
@@ -117,7 +146,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
       session.lastPlanningError = nil
     end
     session.terrainPlan = plan
-    local ok, proposal = pcall(makeProposal, values, matrix, plan)
+    local ok, proposal, inputs = pcall(makeProposal, values, matrix, plan)
     if not ok then
       preview:set(nil)
       setMessage("无法创建施工预览，请调整放置位置")
@@ -127,7 +156,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
     session.proposal = proposal
     nextProposalId = nextProposalId + 1
     preview:set({ owner = session, simple = proposal, revision = session.revision,
-      id = "xin-rail-loop:" .. nextProposalId, planningError = planningError })
+      id = "xin-rail-loop:" .. nextProposalId, planningError = planningError, design=design, inputs=inputs })
     setMessage(planningError or "")
     if not session.plannedLogged then
       session.plannedLogged = true
@@ -234,7 +263,7 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
               if session.overlayRevision ~= candidate.revision or session.overlaySummary ~= summary then
                 session.overlayRevision, session.overlaySummary = candidate.revision, summary
                 local drawn, edges, renderStats = pcall(placement.previewEdges, api, builtin, data, prepared, allowed)
-                if drawn then
+                if drawn and #edges > 0 then
                   -- Keep the ProposalData alive while its geometry is rendered.
                   overlay:set({ owner = session, revision = candidate.revision, edges = edges, source = data })
                   if not session.overlayLogged then
@@ -242,9 +271,22 @@ local Menu = react.RegisterRecipe("XinRailLoopMenu", function(params)
                     log.message(string.format("[Rail Loop] track overlay edges=%d; networks=%d; matched=%d; filtered=%d",
                       #edges, renderStats.networks, renderStats.matched, renderStats.short))
                   end
-                elseif not session.overlayWarning then
+                elseif not drawn and not session.overlayWarning then
                   session.overlayWarning = true
                   log.warning("[Rail Loop] track overlay: " .. tostring(edges))
+                end
+                if (not drawn or #edges == 0) and candidate.design then
+                  local ok, fallback = pcall(designPreview.edges, api, builtin, candidate.design, allowed)
+                  if ok then
+                    overlay:set({ owner=session, revision=candidate.revision, edges=fallback, source=candidate.design })
+                  else
+                    log.warning("[Rail Loop] preview recolor: " .. tostring(fallback))
+                  end
+                end
+                if data.errorState.critical and not diagnosed[fileName] then
+                  diagnosed[fileName] = true
+                  local input = candidate.inputs
+                  session.diagnostics = proposalDiagnostics.queue(placement, input.segments, input.matrix, input.trackName, input.bridgeName)
                 end
               end
               if session.lastCheckSummary ~= summary then
