@@ -1,0 +1,20 @@
+{
+  "modId": "xin_auto_signal_1",
+  "revision": 14,
+  "severityAdd": "None",
+  "severityRemove": "None",
+  "dependencies": [],
+  "incompatibilities": [
+    {
+      "mod": {
+        "modId": "automatic_signal_spacing",
+        "revisionMin": -1,
+        "revisionMax": -1
+      }
+    }
+  ],
+  "params": [],
+  "runScript": {
+    "fileName": "xin_auto_signal_1::/mod.script@runFn"
+  }
+}

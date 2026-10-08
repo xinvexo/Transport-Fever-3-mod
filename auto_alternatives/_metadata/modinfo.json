@@ -1,0 +1,27 @@
+{
+  "name": "Auto Alternative Terminals",
+  "summary": "Automatically select alternative terminals while keeping the primary terminal.",
+  "description": "Automatically select matching alternatives for new line stops and newly added station terminals. Preserve existing manual choices, including Don't Use, and the preferred terminal. Trains, including electric trains, and roadside stops are excluded.",
+  "localization": {
+    "en": {
+      "name": "Auto Alternative Terminals",
+      "summary": "Automatically select alternative terminals while keeping the primary terminal.",
+      "description": "Automatically select matching alternatives for new line stops and newly added station terminals. Preserve existing manual choices, including Don't Use, and the preferred terminal. Trains, including electric trains, and roadside stops are excluded."
+    },
+    "zh_CN": {
+      "name": "自动备用站台",
+      "summary": "保留主站台，自动将其他可用位置设为备用站台。",
+      "description": "为新增停靠站和扩建出的新站台自动补选匹配的备用位置。已有站台的备用、不使用及首选设置按用户选择保留。火车（含电力火车）及路边单侧、双侧停靠点不参与自动备用。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

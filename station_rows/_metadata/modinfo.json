@@ -1,0 +1,27 @@
+{
+  "name": "Station Rows",
+  "summary": "Hold Shift to configure a complete railway station row.",
+  "description": "Hold Shift while configuring a vanilla railway station to fill empty positions in a row or remove a complete row of modules along the tracks.",
+  "localization": {
+    "en": {
+      "name": "Station Rows",
+      "summary": "Hold Shift to configure a complete railway station row.",
+      "description": "Hold Shift while configuring a vanilla railway station to fill empty positions in a row or remove a complete row of modules along the tracks."
+    },
+    "zh_CN": {
+      "name": "车站整列配置",
+      "summary": "按住 Shift，一次配置火车站的一整列。",
+      "description": "配置原版火车站时，按住 Shift 补齐沿铁轨方向一列的空位，或删除一整列模块。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

@@ -1,0 +1,27 @@
+{
+  "name": "Auto Signal",
+  "summary": "Automatically space railway signals across a track section with a minimum distance.",
+  "description": "Enable Auto Signal when placing a railway signal to rearrange all signals facing the same direction in the section. The signal you place may move. Placement stops at junctions, station boundaries and track ends. Set a minimum spacing from 50 to 2000 m. Signals facing the opposite direction are kept. Disable Auto Signal for ordinary single-signal placement. Do not enable Automatic Signal Spacing at the same time.",
+  "localization": {
+    "en": {
+      "name": "Auto Signal",
+      "summary": "Automatically space railway signals across a track section with a minimum distance.",
+      "description": "Enable Auto Signal when placing a railway signal to rearrange all signals facing the same direction in the section. The signal you place may move. Placement stops at junctions, station boundaries and track ends. Set a minimum spacing from 50 to 2000 m. Signals facing the opposite direction are kept. Disable Auto Signal for ordinary single-signal placement. Do not enable Automatic Signal Spacing at the same time."
+    },
+    "zh_CN": {
+      "name": "自动铁路信号",
+      "summary": "按最小间距要求，自动均匀布置整段铁路的信号灯。",
+      "description": "放置信号灯时开启自动布置，即可重新布置本区段所有同向信号灯，刚放下的信号灯也可能移动。布置范围在岔道、车站边界和轨道末端停止。最小间距可设为50至2000米。反向信号灯保留。关闭自动布置后可照常放置单个信号灯。请勿同时启用Automatic Signal Spacing。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

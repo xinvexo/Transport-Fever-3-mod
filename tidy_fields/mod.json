@@ -1,0 +1,12 @@
+{
+  "modId": "xin_tidy_fields_1",
+  "revision": 15,
+  "severityAdd": "None",
+  "severityRemove": "Warning",
+  "dependencies": [],
+  "incompatibilities": [],
+  "params": [],
+  "runScript": {
+    "fileName": "xin_tidy_fields_1::/mod.script@runFn"
+  }
+}
