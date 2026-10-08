@@ -80,10 +80,10 @@ class PrefabResourceTests(unittest.TestCase):
             self.assertEqual(definition.description.previewIcon, kind + '_loop_preview.tga')
             keys = [p.key for p in definition.params.values()]
             self.assertEqual(keys, ['trackType', 'trackType', 'catenary'] +
-                             (['bridgeType'] * 2 + ['bridgeTypeModern'] * 3 if kind == 'raised' else []))
+                             ['bridgeType'] * 2 + ['bridgeTypeModern'] * 3)
             self.assertTrue(definition.configureHudIconsScript.fileName.endswith('@configureTrackConstructionHudIconsFn'))
         self.assertFalse(list(CONTENT.glob('dynamic_*')))
-        self.assertFalse(list(CONTENT.glob('*.res.lua')), 'No dynamic UI plugin should remain active')
+        self.assertEqual([p.name for p in CONTENT.glob('*.res.lua')], ['ui_entry.res.lua'])
 
     def test_native_track_choices_and_explicit_template_override(self):
         for kind in ('raised', 'lowered'):
@@ -213,7 +213,7 @@ class PrefabResourceTests(unittest.TestCase):
                         seen.add(node)
                         pending.extend(adjacency[node] - seen)
                 self.assertEqual(seen, set(adjacency), 'Every port and branch belongs to one connected network')
-                for i in (1, 3, 5, 7):
+                for i in range(1, len(groups[-1].edges) + 1, 2):
                     start, end = groups[-1].edges[i], groups[-1].edges[i + 1]
                     self.assertEqual(start[1][1], end[1][1])
                     self.assertEqual(start[1][3], 0)

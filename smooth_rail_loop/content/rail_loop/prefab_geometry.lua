@@ -156,4 +156,30 @@ function geometry.generate(kind)
     mainlineStart = -CONNECTION_LENGTH, mainlineEnd = CONNECTION_LENGTH }
 end
 
+function geometry.network(kind)
+  local segments, info = geometry.generate(kind)
+  for i, segment in ipairs(segments) do
+    segment.route = "loop"
+    segment.tag0 = i == 1 and "junction:left" or "loop:" .. (i - 1)
+    segment.tag1 = i == #segments and "junction:right" or "loop:" .. i
+  end
+  for side, x in ipairs({ -info.spacing / 2, info.spacing / 2 }) do
+    local name = side == 1 and "left" or "right"
+    for half, bounds in ipairs({ { info.mainlineStart, 0 }, { 0, info.mainlineEnd } }) do
+      local count = math.ceil((bounds[2] - bounds[1]) / 12)
+      local length = (bounds[2] - bounds[1]) / count
+      for i = 1, count do
+        local y0, y1 = bounds[1] + (i - 1) * length, bounds[1] + i * length
+        local tag0 = y0 == 0 and "junction:" .. name or "main:" .. name .. ":" .. half .. ":" .. (i - 1)
+        local tag1 = y1 == 0 and "junction:" .. name or "main:" .. name .. ":" .. half .. ":" .. i
+        segments[#segments + 1] = { kind = "NORMAL", route = "main",
+          p0 = { x, y0, 0 }, p1 = { x, y1, 0 },
+          t0 = { 0, length, 0 }, t1 = { 0, length, 0 }, tag0 = tag0, tag1 = tag1,
+          snap0 = half == 1 and i == 1, snap1 = half == 2 and i == count }
+      end
+    end
+  end
+  return segments, info
+end
+
 return geometry
