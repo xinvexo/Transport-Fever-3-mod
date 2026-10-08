@@ -22,6 +22,37 @@ function M.isTrack(entity)
   return e~=nil and e.roadType==api.type["enum"].RoadType.TRACK
 end
 
+function M.resnap(point,snapping)
+  assert(M.current(point),"轨道已改变，请重新选点")
+  local edge=api.engine.getComponent(point.entity,api.type.ComponentType.BASE_EDGE)
+  local rawU=point.rawU or point.u
+  local p=sample(edge,rawU)
+  local u,best=rawU,math.huge
+  if snapping~=false then
+    for _,endpoint in ipairs({0,1}) do
+      local q=sample(edge,endpoint)
+      local distance=(p[1]-q[1])^2+(p[2]-q[2])^2+(p[3]-q[3])^2
+      local close=distance<4
+      if not close and distance<100 and point.mouse then
+        local screen=api.gui.camera.world2Screen(vec(q))
+        close=(screen.x-point.mouse.x)^2+(screen.y-point.mouse.y)^2<=64
+      end
+      if close and distance<best then u,best=endpoint,distance end
+    end
+  end
+  local position,tangent=sample(edge,u)
+  return {entity=point.entity,u=u,rawU=rawU,p=position,t=tangent,revision=point.revision,
+    mouse=point.mouse,nativeSnap=point.nativeSnap,snapped=u==0 or u==1}
+end
+
+function M.pickProblem(point,first)
+  if first and first.entity==point.entity then return "请选择另一条轨道上的连接点" end
+  if point.u~=0 and point.u~=1 then
+    local edge=api.engine.getComponent(point.entity,api.type.ComponentType.BASE_EDGE)
+    if #edge.objects>0 then return "这段轨道带有信号或路标，请选择端点或旁边的轨道段" end
+  end
+end
+
 function M.pick(entity,details,mouse,snapping)
   local target
   if details and details.data and details.data.kind==api.gui.SelectionDetails.Type.TransportNetworkEdge then
@@ -32,7 +63,7 @@ function M.pick(entity,details,mouse,snapping)
     if e then target=array(e.geometry:calcPos(snap.param)[1]) end
   end
   assert(M.isTrack(entity),"请点击普通铁路轨道")
-  assert(target or mouse,"请先把鼠标移到轨道上再点击")
+  assert(target or (mouse and type(mouse.x)=="number" and type(mouse.y)=="number"),"请先把鼠标移到轨道上再点击")
   local edge=api.engine.getComponent(entity,api.type.ComponentType.BASE_EDGE)
   local function distance(u)
     local p=sample(edge,u)
@@ -48,14 +79,12 @@ function M.pick(entity,details,mouse,snapping)
     if distance(l)<distance(r) then hi=r else lo=l end
   end
   local u=(lo+hi)/2
-  local p,t=sample(edge,u)
-  local p0,p1=edgeData(edge)
-  local function dist(a,b) return math.sqrt((a[1]-b[1])^2+(a[2]-b[2])^2+(a[3]-b[3])^2) end
-  if snapping~=false then
-    if dist(p,p0)<2 then u=0 elseif dist(p,p1)<2 then u=1 end
-  end
-  p,t=sample(edge,u)
-  return {entity=entity,u=u,p=p,t=t,revision=revision(entity)}
+  -- The bounded search approaches an endpoint without landing exactly on it.
+  -- Preserve an exact endpoint hit even when automatic snapping is disabled.
+  if distance(0)<distance(u) then u=0 end
+  if distance(1)<distance(u) then u=1 end
+  local cursor=mouse and type(mouse.x)=="number" and type(mouse.y)=="number" and {x=mouse.x,y=mouse.y} or nil
+  return M.resnap({entity=entity,u=u,rawU=u,revision=revision(entity),mouse=cursor,nativeSnap=target~=nil},snapping)
 end
 
 function M.make(a,b,options,segments,info)

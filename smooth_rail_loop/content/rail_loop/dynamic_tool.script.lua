@@ -3,7 +3,6 @@ local builtin = require "::/gui/main/builtin.lua"
 local proposalUtil = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_proposal.lua"
 local geometry = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_geometry.lua"
 local previewUtil = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_preview.lua"
-local enum = api.type["enum"]
 local constructionUtil = ug_require "::/gui/construction/construction_react_util.tl"
 local entryPoint = ug_require "::/gui/main/mod_entry_point.tl"
 local toolbarApi
@@ -24,9 +23,12 @@ local function currentOptions(params, state)
 end
 local function optionKey(o)
   return table.concat({o.extension,o.elevation,o.direction,o.bend,
-    o.bridgeType or -1,o.tunnelType or -1,o.trackTemplate or "",tostring(o.underground)}, ":")
+    o.bridgeType or -1,o.tunnelType or -1,o.trackTemplate or "",tostring(o.underground),tostring(o.snapping)}, ":")
 end
 local function errorMessage(err) return tostring(err):gsub("^.-:%d+: ", "") end
+local function pointKey(point)
+  return point and (point.entity..":"..point.revision..string.format(":%.6f",point.u)) or "none"
+end
 
 -- ActionFn must create ActionDescriptor directly in its own recipe context.
 -- RegisterRecipe around this function triggers a native fatal assertion.
@@ -36,23 +38,37 @@ local function Tool(params)
   local tick = react.useState(0)
   local s = state:get()
   local function active() return not state:hasExpired() and not s.closed end
+  local function planPoints()
+    local a,b=s.points[1],s.points[2] or s.hover
+    if a and b and a.entity~=b.entity then return a,b end
+  end
+  local function planKey()
+    local a,b=planPoints()
+    if a then return #s.points..":"..pointKey(a)..":"..pointKey(b)..":"..optionKey(currentOptions(params,s)) end
+  end
   if not s.loggedEntry then
     s.loggedEntry = true
     log.message("[Rail Loop] Tool entered: "..params.definition.resName)
   end
   local function refresh() if active() then tick:set(tick:old()+1) end end
-  local function invalidate()
+  local function invalidate(keepOutline)
     s.serial = s.serial+1;s.ready = false;s.proposal = nil;s.price = nil;s.info = nil
-    s.segments = nil;s.renderEdges = nil;s.renderStatus = nil;s.renderError = nil
+    if not keepOutline then s.segments = nil;s.renderEdges = nil end
+    s.renderStatus = nil;s.renderError = nil;s.planKey = nil;s.planDirty = false
     s.previewChecked = false;s.previewValid = false;s.failed = false;s.previewMessage = nil;s.previewCost = nil
   end
   local function reset()
     if not active() or s.busy then return end
-    invalidate();s.points = {};s.extension = 0;s.direction = 1;s.pendingShape = nil;s.message = "① 点击第一条轨道上的连接点";refresh()
+    invalidate();s.points = {};s.hover = nil;s.hoverReason = nil
+    s.extension = 0;s.direction = 1;s.pendingShape = nil;s.message = "① 点击第一条轨道上的连接点";refresh()
   end
   local function back()
     if not active() or s.busy then return end
-    if #s.points>0 then reset();return end
+    if #s.points==2 then
+      invalidate();s.points[2]=nil;s.hover=nil;s.hoverReason=nil
+      s.extension=0;s.direction=1;s.pendingShape=nil;s.message="② 移到另一条轨道，预览后单击固定终点";refresh();return
+    end
+    if #s.points==1 then reset();return end
     s.closed = true;invalidate()
     -- abort() alone leaves the mouse toolbar in mode 3 and rebinds this tool.
     local menuApi = toolbarApi
@@ -62,20 +78,23 @@ local function Tool(params)
     if not mode then params.abort() end
   end
   local function showPreviewResult()
-    s.ready = s.previewValid and not s.pendingShape or false
-    s.price = s.ready and s.previewCost or nil
-    s.message = s.pendingShape and "正在更新施工预览……" or
-      (s.ready and "移动鼠标调整长度；用原高度、弯曲和桥隧选项调整，单击确认。" or s.previewMessage or "正在检查施工预览……")
+    local valid=s.previewValid and not s.pendingShape and not s.planDirty
+    s.ready = valid and #s.points==2 or false
+    s.price = valid and s.previewCost or nil
+    s.message = (s.pendingShape or s.planDirty) and "正在更新施工预览……" or
+      (valid and (#s.points==1 and "单击固定终点；右键或 Esc 重选起点。" or
+        "移动鼠标调整长度；用原高度、弯曲和桥隧选项调整，单击建造。") or s.previewMessage or "正在检查施工预览……")
   end
   local function recompute()
     invalidate()
     local opts = currentOptions(params,s)
-    s.optionKey = optionKey(opts)
-    if #s.points == 2 then
-      local ok,segments,info = pcall(geometry.generate,s.points[1],s.points[2],opts)
+    s.planKey = planKey()
+    local a,b=planPoints()
+    if a then
+      local ok,segments,info = pcall(geometry.generate,a,b,opts)
       if ok then
         s.segments = segments;s.info = info
-        local made,proposal = pcall(proposalUtil.make,s.points[1],s.points[2],opts,segments,info)
+        local made,proposal = pcall(proposalUtil.make,a,b,opts,segments,info)
         if made then s.proposal = proposal;s.message = "正在检查施工预览……"
         else s.failed = true;s.message = errorMessage(proposal) end
       else s.failed = true;s.message = errorMessage(segments) end
@@ -83,28 +102,54 @@ local function Tool(params)
         s.previewMessage = s.message
         log.message("[Rail Loop] Preview failed: "..s.message)
       end
+    else
+      s.message=#s.points==1 and "② 移到另一条轨道，预览后单击固定终点" or "① 点击第一条轨道上的连接点"
     end
     refresh()
   end
+  local function setHover(point)
+    local reason=point and proposalUtil.pickProblem(point,s.points[1])
+    local changed=pointKey(s.hover)~=pointKey(point) or reason~=s.hoverReason
+    s.hover=point;s.hoverReason=reason;s.hoverSnapping=currentOptions(params,s).snapping
+    if not changed then return end
+    if #s.points==1 then
+      if planPoints() then
+        local hadOutline=s.segments~=nil
+        invalidate(true);s.planDirty=true;s.message="正在更新施工预览……"
+        if not hadOutline then recompute() end
+      else recompute() end
+    else s.message="① 点击第一条轨道上的连接点" end
+    refresh()
+  end
+  local function hover(entity,indices,details)
+    if not active() or s.busy or #s.points==2 then return end
+    if not proposalUtil.isTrack(entity) then setHover(nil);return end
+    local ok,point=pcall(proposalUtil.pick,entity,details,s.mouse,currentOptions(params,s).snapping)
+    setHover(ok and point or nil)
+  end
   local build
+  local function acceptPoint(point)
+    if not point or not proposalUtil.current(point) then return end
+    local reason=proposalUtil.pickProblem(point,s.points[1])
+    if reason then s.message=reason;s.hoverReason=reason;refresh();return end
+    s.points[#s.points+1]=point;s.hover=nil;s.hoverReason=nil;s.pendingShape=nil
+    log.message(string.format("[Rail Loop] Point %d: entity=%d u=%.6f position=(%.3f,%.3f,%.3f) tangent=(%.3f,%.3f,%.3f) snapped=%s nativeHit=%s",
+      #s.points,point.entity,point.u,point.p[1],point.p[2],point.p[3],point.t[1],point.t[2],point.t[3],
+      tostring(point.snapped),tostring(point.nativeSnap)))
+    recompute()
+  end
   local function pick(entity,indices,details)
     if not active() or s.busy then return true end
     if #s.points == 2 then if s.ready then build() end;return true end
     local ok,point = pcall(proposalUtil.pick,entity,details,s.mouse,currentOptions(params,s).snapping)
     if not ok then s.message = errorMessage(point);log.message("[Rail Loop] Pick failed: "..s.message);refresh();return true end
-    if #s.points == 1 and point.entity == s.points[1].entity then
-      s.message = "请选择另一条轨道上的连接点";refresh();return true
-    end
-    s.points[#s.points+1] = point
-    log.message(string.format("[Rail Loop] Point %d: entity=%d u=%.6f position=(%.3f,%.3f,%.3f) tangent=(%.3f,%.3f,%.3f)",
-      #s.points,point.entity,point.u,point.p[1],point.p[2],point.p[3],point.t[1],point.t[2],point.t[3]))
-    if #s.points == 2 then recompute()
-    else s.message = "② 点击另一条轨道上的连接点";refresh() end
+    if proposalUtil.pickProblem(point,s.points[1]) then setHover(point)
+    else acceptPoint(point) end
     return true
   end
   build = function()
-    if not active() or s.busy or s.pendingShape or not s.ready or not s.proposal then return end
-    if optionKey(currentOptions(params,s))~=s.optionKey then recompute();return end
+    if not active() or s.busy or #s.points~=2 or s.pendingShape or s.planDirty or not s.ready or not s.proposal then return end
+    if planKey()~=s.planKey then recompute();return end
     if not proposalUtil.current(s.points[1]) or not proposalUtil.current(s.points[2]) then recompute();return end
     local balance = api.engine.util.finance.getPlayersBalance(api.engine.util.getPlayer())
     if balance and s.price and s.price>balance then s.message = "资金不足";refresh();return end
@@ -133,24 +178,43 @@ local function Tool(params)
   end
   react.onStep(function()
     if not active() or s.busy then return end
-    if #s.points>0 then
-      for _,p in ipairs(s.points) do
-        if not proposalUtil.current(p) then reset();s.message = "轨道已改变，请重新选点。";refresh();return end
-      end
+    if s.points[1] and not proposalUtil.current(s.points[1]) then
+      reset();s.message="起点轨道已改变，请重新选点。";refresh();return
+    end
+    if s.points[2] and not proposalUtil.current(s.points[2]) then
+      back();s.message="终点轨道已改变，请重新选择终点。";refresh();return
+    end
+    local snapping=currentOptions(params,s).snapping
+    if s.hover then
+      if not proposalUtil.current(s.hover) then setHover(nil)
+      elseif snapping~=s.hoverSnapping then setHover(proposalUtil.resnap(s.hover,snapping)) end
     end
     s.frame = (s.frame or 0)+1
-    if s.pendingShape and s.frame%8==0 then
+    if s.pendingShape and s.frame%4==0 then
       s.extension,s.direction = s.pendingShape[1],s.pendingShape[2]
       s.pendingShape = nil
     end
-    if optionKey(currentOptions(params,s))~=s.optionKey then recompute() end
+    if planKey()~=s.planKey and (not s.planDirty or s.frame%4==0) then recompute() end
   end)
   local children = {
     builtin.Selector{
       filter = proposalUtil.isTrack,
+      onHover = hover,
       onProcessMouseEvent = function(event)
-        if not active() then return false end
-        s.mouse = {x=event.x,y=event.y}
+        if not active() or event.handled then return false end
+        if type(event.x)=="number" and type(event.y)=="number" then
+          s.mouse = {x=event.x,y=event.y}
+          -- The native hover event supplies precise network hits. Keep a
+          -- candidate moving along the same rail between hover notifications.
+          if #s.points<2 and s.hover and event.type~=api.gui.mouse.Event.Type.Clicked then
+            local ok,point=pcall(proposalUtil.pick,s.hover.entity,nil,s.mouse,currentOptions(params,s).snapping)
+            if ok then
+              local screen=api.gui.camera.world2Screen(api.type.Vec3f.new(point.p[1],point.p[2],point.p[3]))
+              if (screen.x-event.x)^2+(screen.y-event.y)^2>100 then point=nil end
+            end
+            setHover(ok and point or nil)
+          end
+        end
         if #s.points==2 and not s.busy and api.gui.mouse.hasTerrainPosition() then
           local p = api.gui.mouse.getTerrainPosition()
           local a,b = s.points[1],s.points[2]
@@ -169,12 +233,12 @@ local function Tool(params)
         -- here too so extending the loop does not require clicking a rail again.
         if not event.handled and event.type==api.gui.mouse.Event.Type.Clicked then
           if event.button==0 and #s.points==2 then build();return true end
-          if event.button==2 and #s.points>0 then reset();return true end
+          if event.button==2 then back();return true end
         end
         return false
       end,
       onSelect = pick,
-      onSelectSecondary = function() reset();return true end,
+      onSelectSecondary = function() back();return true end,
       selectionColor = api.type.Vec4f.new(0.1,0.9,0.8,0.4),
       selectionOutlineColor = api.type.Vec4f.new(0.1,0.9,0.8,0.8),
       selectionOutlineColor1 = api.type.Vec4f.new(0.1,0.9,0.8,1),
@@ -187,7 +251,7 @@ local function Tool(params)
       entityForRefundableContext = api.engine.util.getPlayer(),
       proposalId = "xin-dynamic-loop:"..tostring(s)..":"..serial,
       onCreateProposalData = function(data,preparedProposal)
-        if not active() or s.serial~=serial or s.busy then return end
+        if not active() or s.serial~=serial or s.busy or planKey()~=s.planKey then return end
         local errors = data.errorState
         s.previewChecked = true;s.previewCost = data.costs
         s.previewValid = not errors.critical and #errors.messages==0
@@ -216,7 +280,7 @@ local function Tool(params)
               serial,tostring(errors.critical),tostring(data.costs),table.concat(errors.messages," | "),
               table.concat(errors.warnings or {}," | "),table.concat(errors.infos or {}," | "),table.concat(collisionIds,","),
               #street.nodesToAdd,#street.edgesToAdd,#street.edgesToRemove,
-              prepared and tostring(#prepared.addedSegments) or "none",s.optionKey,table.concat(crossingInfo,"; ")))
+              prepared and tostring(#prepared.addedSegments) or "none",optionKey(currentOptions(params,s)),table.concat(crossingInfo,"; ")))
           end
         end
         showPreviewResult()
@@ -225,7 +289,8 @@ local function Tool(params)
     }
   end
   if s.segments then
-    local status=(s.failed or (s.previewChecked and not s.previewValid)) and "blocked" or (s.ready and "ready" or "pending")
+    local status=(s.failed or (s.previewChecked and not s.previewValid)) and "blocked" or
+      (s.previewValid and not s.planDirty and not s.pendingShape and "ready" or "pending")
     if s.renderStatus~=status then
       local color=status=="blocked" and api.type.Vec4f.new(1,0.2,0.15,0.9) or
         (status=="ready" and api.type.Vec4f.new(0.15,0.9,0.55,0.85) or api.type.Vec4f.new(0.2,0.7,1,0.85))
@@ -244,17 +309,40 @@ local function Tool(params)
       children[#children+1]=builtin.EdgeRenderable{edges=s.renderEdges,ignoreDepth=true}
     end
   end
+  local function addPoint(point,key,isHover)
+    local ok,control=pcall(previewUtil.controlPoint,point,isHover,isHover and s.hoverReason~=nil)
+    if ok then
+      children[#children+1]=builtin.ProposalViewer{
+        controlPointInfo=control,proposalId="xin-loop-point:"..tostring(s)..":"..key,
+      }
+    elseif not s.loggedMarkerError then
+      s.loggedMarkerError=true;log.message("[Rail Loop] Point marker failed: "..errorMessage(control))
+    end
+  end
+  for index,point in ipairs(s.points) do addPoint(point,tostring(index),false) end
+  if s.hover and #s.points<2 then addPoint(s.hover,"hover",true) end
   local message = s.message
+  if s.hoverReason then message=s.hoverReason
+  elseif s.hover and s.hover.snapped then message=message.."\n已吸附轨道端点" end
   if s.renderError then message=message.."\n轨迹预览未能显示，错误已记录。" end
   if s.info then message = message..string.format("\n长度 %.0f m",s.info.length) end
   children[#children+1] = builtin.ActionTooltip{
     recipe = constructionUtil.SimpleTooltipRecipe,
-    param = {message = {message=message,bad=s.failed or (s.previewChecked and not s.previewValid and not s.pendingShape),good=s.ready or false},cost=s.price},
+    param = {message = {message=message,bad=s.hoverReason~=nil or s.failed or
+      (s.previewChecked and not s.previewValid and not s.pendingShape and not s.planDirty),
+      good=s.previewValid and not s.planDirty and not s.pendingShape or false},cost=s.price},
   }
   local layer = api.type.LayerConfig.new()
   layer.undergroundMode = currentOptions(params,s).underground
   children[#children+1] = builtin.LayerConfig{config=layer}
-  react.useInputAction("IA_APPLY",react.iaHandler(build,function() return s.ready and not s.busy end,"建造回环"))
+  react.useInputAction("IA_APPLY",react.iaHandler(function()
+    if not active() or s.busy then return end
+    if #s.points<2 then acceptPoint(s.hover) else build() end
+  end,function()
+    if not active() or s.busy then return false end
+    if #s.points<2 then return s.hover~=nil and s.hoverReason==nil end
+    return s.ready and not s.pendingShape and not s.planDirty and planKey()==s.planKey
+  end,#s.points==0 and "固定起点" or (#s.points==1 and "固定终点" or "建造回环")))
   local function backState()
     local states=api.gui.inputAction.InputActionState
     if not active() then return states.Disabled end
@@ -280,7 +368,8 @@ local function Tool(params)
   end
   return builtin.ActionDescriptor{
     tool = "construction-menu-tracks",terrainCirclePolicy = "Never",
-    highlightedEntities = #s.points>0 and {s.points[1].entity,s.points[2] and s.points[2].entity or s.points[1].entity} or {},
+    highlightedEntities = #s.points==2 and {s.points[1].entity,s.points[2].entity} or
+      (#s.points==1 and {s.points[1].entity} or {}),
     onBack = back,
     children = children,
   }
@@ -343,5 +432,5 @@ end
 
 local entry = react.RegisterPluginRecipe(entryPoint.ModEntryPointExtension,
   "XinNativeRailLoopEntry",function() return nil end)
-log.message("[Rail Loop] Native track mode installed (revision 5).")
+log.message("[Rail Loop] Native track mode installed (revision 6).")
 function data() return {entry=entry} end

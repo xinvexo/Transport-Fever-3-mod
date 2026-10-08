@@ -2,6 +2,12 @@ local builtin = require "::/gui/main/builtin.lua"
 local geometry = require "xin_smooth_rail_loop_1::/rail_loop/dynamic_geometry.lua"
 local M = {}
 
+function M.controlPoint(point,hover,invalid)
+  local kind=builtin.type.ControlPointInfo
+  local state=invalid and kind.State.Invalid or (hover and kind.State.Hover or kind.State.Idle)
+  return kind.new(api.type.Vec3f.new(point.p[1],point.p[2],point.p[3]),0.25,2.5,state)
+end
+
 -- Draw the planned rails directly; ProposalViewer may produce no mesh when
 -- the engine rejects a junction or collision. This never submits construction.
 function M.make(segments, color)

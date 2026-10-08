@@ -1,7 +1,7 @@
 {
   "name": "Smooth Rail Loop",
   "summary": "A two-point return loop mode in the native track menu, reusing its height, bend and bridge/tunnel controls.",
-  "description": "在原生轨道菜单中选择两条轨道上的连接点，移动鼠标调整回环长度和方向，复用原高度、弯曲和桥隧选项。无法施工时保留红色双线轨迹供调整。Esc 取消选点，再按一次返回普通铺轨。中段选点所在轨道段需不带信号或路标。",
+  "description": "在轨道菜单中悬停查看落点，单击固定起点，移到另一条轨道即可预览回环。固定终点后移动鼠标调整长度和方向，复用原高度、弯曲和桥隧选项。右键或 Esc 逐步撤销终点、起点，再退出回环模式。中段选点所在轨道段需不带信号或路标。",
   "tags": [
     "Script Mod"
   ],

@@ -12,19 +12,24 @@ local function edge(x)
 end
 local entities={[10]=edge(0),[20]=edge(5)}
 local revision=1
+local revisions,networks={},{}
 local enum={RoadType={TRACK="TRACK"},BaseEdgeType={NORMAL="NORMAL",BRIDGE="BRIDGE",TUNNEL="TUNNEL"},
   ScriptParamType={Slider="Slider",ComboBox="ComboBox",Button="Button"},
   ScriptParamLocation={Default=1},ScriptParamDisplayMode={Horizontal=1}}
 local components={BASE_EDGE="BASE_EDGE",PLAYER_OWNED="PLAYER_OWNED",TRANSPORT_NETWORK="TRANSPORT_NETWORK"}
 local built,previewCallbacks=nil,{}
 api={type={enum=enum,ComponentType=components,
-    Vec3f={new=v3},Vec4f={new=function(...) return {...} end},
+    Vec3f={new=v3},Vec4f={new=function(...) return {...} end},EdgePos={new=copy},
     SimpleProposal={new=function() return {streetProposal={}} end},
     NodeAndEntity={new=function() return {comp={}} end},SegmentAndEntity={new=function() return {comp={}} end},
     Context={new=function() return {} end}},
   engine={entityExists=function(id) return entities[id]~=nil end,
-    getRevision=function() return {num={revision,0,0}} end,
-    getComponent=function(id,kind) if kind=="BASE_EDGE" then return entities[id] end;if kind=="PLAYER_OWNED" then return {player=1} end end,
+    getRevision=function(id) return {num={revisions[id] or revision,0,0}} end,
+    getComponent=function(id,kind)
+      if kind=="BASE_EDGE" then return entities[id] end
+      if kind=="PLAYER_OWNED" then return {player=1} end
+      if kind=="TRANSPORT_NETWORK" then return networks[id] end
+    end,
     util={getPlayer=function() return 1 end,finance={getPlayersBalance=function() return 1e9 end}}},
   res={bridgeTypeRep={find=function() return 7 end},tunnelTypeRep={find=function() return 8 end}},
   gui={SelectionDetails={Type={TransportNetworkEdge=1}},camera={world2Screen=function(p) return p end},
@@ -77,6 +82,25 @@ assert(entities[10].objects[1][1]==999)
 entities[10].objects={}
 revision=2;assert(not pcall(proposal.make,a,b,{extension=0,elevation=0,direction=1}));revision=1
 assert(not pcall(proposal.make,a,a,{extension=0,elevation=0,direction=1}))
+
+-- Screen-space snapping is bounded in world space and honours its toggle.
+local nearStart=proposal.pick(10,nil,{x=0,y=7},true)
+assert(nearStart.u==0 and nearStart.snapped)
+local unsnapped=proposal.resnap(nearStart,false)
+assert(math.abs(unsnapped.p[2]-7)<.001 and not unsnapped.snapped)
+assert(proposal.pick(10,nil,{x=0,y=993},true).u==1)
+assert(proposal.pick(10,nil,{x=0,y=20},true).u>0)
+assert(proposal.pick(10,nil,{x=0,y=0},false).u==0)
+assert(proposal.pick(10,nil,{x=0,y=1000},false).u==1)
+entities[10].objects={{999,2}}
+assert(proposal.pickProblem(nearStart)==nil and proposal.pickProblem(unsnapped))
+entities[10].objects={}
+
+-- A transport-network subedge parameter is not the BASE_EDGE parameter.
+networks[20]={edges={{geometry={calcPos=function(self,u) return {v3(5,200+400*u,0)} end}}}}
+local nativeDetails={data={kind=1,snap={edgeId={entity=20,index=0},param=.375}}}
+local nativePoint=proposal.pick(20,nativeDetails,{x=500,y=900},false)
+assert(nativePoint.nativeSnap and math.abs(nativePoint.u-.35)<1e-6)
 
 
 local instances,recipes,logs={},{},{}
@@ -136,6 +160,8 @@ local builtin={type={Orientation={Vertical=1,Horizontal=2},EdgeRenderable={Edge=
   assert(shape.height and shape.tangent and shape.length>0 and shape.width>0)
   return {geometry=shape}
 end}}}}
+builtin.type.ControlPointInfo={State={Invalid="Invalid",Hover="Hover",Idle="Idle"},
+  new=function(position,offsetZ,radius,state) return {position=position,offsetZ=offsetZ,radius=radius,state=state} end}
 for _,name in ipairs({"Selector","ProposalViewer","ActionDescriptor","ActionTooltip","LayerConfig","EdgeRenderable"}) do
   builtin[name]=function(p)
     if name=="ActionDescriptor" then assert(scope=="ActionFn","Native descriptor must be a direct ActionFn child") end
@@ -224,7 +250,14 @@ local function render()
   return renderInstance("tool","ActionFn",bound)
 end
 local function find(action,name)
-  for _,c in ipairs(action.children) do if c.recipeName==name then return c end end
+  for _,c in ipairs(action.children) do
+    if c.recipeName==name and (name~="ProposalViewer" or c.onCreateProposalData) then return c end
+  end
+end
+local function markers(action)
+  local result={}
+  for _,c in ipairs(action.children) do if c.controlPointInfo then result[#result+1]=c.controlPointInfo end end
+  return result
 end
 local function input(key) return instances.tool.actions[key] end
 local function enabled(key) return input(key).state()==states.Enabled end
@@ -248,11 +281,36 @@ oldBack.fn();assert(options.mode==1 and bound==nil and secondBound==nil and abor
 assert(oldBack.state()==states.Disabled)
 for _=1,3 do stepAll();assert(bound==nil) end
 toolbar.changeParam(1,3);stepAll();assert(bound)
--- One pick: cancel stays in loop mode and starts over.
+-- Hover markers, endpoint snapping, and toggling snapping without moving.
 action=render();local selector=find(action,"Selector")
-selector.onProcessMouseEvent({x=0,y=350});selector.onSelect(10)
+selector.onProcessMouseEvent({x=0,y=7,type="Moved"});selector.onHover(10)
+action=render();assert(#markers(action)==1 and markers(action)[1].position.y==0)
+assert(markers(action)[1].state=="Hover" and enabled("IA_APPLY"))
+options.disableSnapping=2;stepAll();action=render()
+assert(math.abs(markers(action)[1].position.y-7)<.001)
+input("IA_APPLY").fn();action=render()
+assert(#markers(action)==1 and markers(action)[1].state=="Idle")
+local firstY=markers(action)[1].position.y
+options.disableSnapping=1;stepAll();action=render()
+assert(markers(action)[1].position.y==firstY,"Locked points must not move with snapping settings")
 action=render();input("IA_ABORT").fn()
-action=render();assert(options.mode==3 and #action.highlightedEntities==0)
+action=render();assert(options.mode==3 and #action.highlightedEntities==0 and #markers(action)==0)
+
+-- The second native hit previews the loop before clicking, even when its
+-- transport-network parameter differs from the BASE_EDGE parameter.
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=0,y=350});selector.onHover(10)
+action=render();assert(math.abs(markers(action)[1].position.y-350)<.001)
+find(action,"Selector").onSelect(10);action=render()
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=500,y=900});selector.onHover(20,nil,nativeDetails)
+action=render();local hovering=find(action,"ProposalViewer")
+assert(hovering and find(action,"EdgeRenderable") and #markers(action)==2)
+assert(math.abs(markers(action)[2].position.y-350)<.001)
+checked(hovering,false);action=render();assert(enabled("IA_APPLY") and built==nil)
+input("IA_APPLY").fn();action=render()
+assert(#action.highlightedEntities==2 and built==nil and not enabled("IA_APPLY"),"Fixing the second point must not build")
+checked(hovering,false,{},1);action=render();assert(not enabled("IA_APPLY"))
+input("IA_ABORT").fn();action=render();assert(#markers(action)==1)
+input("IA_ABORT").fn();action=render();assert(#markers(action)==0)
 
 -- Before any native callback, an independent rail outline is already visible.
 action=twoPoints();local preview=find(action,"ProposalViewer")
@@ -283,6 +341,8 @@ action=render();assert(enabled("IA_APPLY") and find(action,"ActionTooltip").para
 
 -- Movement makes the old check pending, never an unexplained red/$0 failure.
 terrainPosition={x=0,y=750}
+find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved",handled=true})
+action=render();assert(enabled("IA_APPLY"),"Toolbar mouse movement must not stretch the loop")
 find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved"})
 action=render();assert(not enabled("IA_APPLY"))
 assert(find(action,"ActionTooltip").param.cost==nil)
@@ -294,7 +354,8 @@ terrainPosition=nil
 
 -- A changed height invalidates old callbacks and updates rail heights/bridges.
 local old=preview
-options.height=8;stepAll();action=render();assert(not enabled("IA_APPLY"))
+options.height=8;assert(not enabled("IA_APPLY"));input("IA_APPLY").fn();assert(built==nil)
+stepAll();action=render();assert(not enabled("IA_APPLY"))
 checked(old,false,{},1)
 action=render();assert(not enabled("IA_APPLY"))
 preview=find(action,"ProposalViewer");assert(preview)
@@ -314,22 +375,76 @@ action=render();assert(enabled("IA_APPLY"));input("IA_APPLY").fn();assert(built)
 action=render();assert(not find(action,"ProposalViewer") and not find(action,"EdgeRenderable"))
 assert(find(action,"ActionTooltip").param.message.message:find("已建造",1,true))
 
--- Proposal assembly failure still leaves the independently generated rails.
-options.height=0;entities[10].objects={{999,2}}
-action=twoPoints();assert(not find(action,"ProposalViewer"))
+-- Moving a candidate, leaving the track, and track edits invalidate stale
+-- checks but keep the first locked point.
+built=nil;options.height=0
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=0,y=350});selector.onSelect(10)
+action=render();selector=find(action,"Selector")
+selector.onProcessMouseEvent({x=5,y=350});selector.onHover(20)
+action=render();local candidateA=find(action,"ProposalViewer");checked(candidateA,false)
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=5,y=450});selector.onHover(20)
+checked(candidateA,false,{},1)
+for _=1,4 do stepAll() end
+action=render();local candidateB=find(action,"ProposalViewer")
+assert(candidateB and candidateA.proposalId~=candidateB.proposalId)
+checked(candidateB,false,{},222);checked(candidateA,true,{"stale failure"},0)
+action=render();assert(find(action,"ActionTooltip").param.cost==222)
+assert(math.abs(markers(action)[2].position.y-450)<.001 and built==nil)
+find(action,"Selector").onProcessMouseEvent({x=200,y=350,type="Moved"})
+action=render();assert(#markers(action)==1 and not find(action,"EdgeRenderable"))
+find(action,"Selector").onHover(nil);checked(candidateB,false)
+action=render();assert(#markers(action)==1 and not find(action,"EdgeRenderable"))
+assert(not enabled("IA_APPLY") and find(action,"ActionTooltip").param.cost==nil)
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=5,y=350});selector.onHover(20)
+action=render();old=find(action,"ProposalViewer")
+revisions[20]=2;stepAll();checked(old,false)
+action=render();assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"ProposalViewer"))
+revisions[20]=nil
+
+-- Invalid second points still have a visible marker and red outline, but
+-- cannot be locked or sent to construction.
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=0,y=400});selector.onHover(10)
+action=render();assert(markers(action)[2].state=="Invalid" and not enabled("IA_APPLY"))
+assert(not find(action,"ProposalViewer"))
+entities[20].objects={{999,2}}
+selector=find(action,"Selector");selector.onProcessMouseEvent({x=5,y=350});selector.onHover(20)
+action=render();assert(not find(action,"ProposalViewer"))
+assert(markers(action)[2].state=="Invalid" and not enabled("IA_APPLY"))
 assert(find(action,"EdgeRenderable") and find(action,"EdgeRenderable").edges[1].colors[1][1]==1)
-terrainPosition={x=0,y=750};find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved"})
-terrainPosition={x=0,y=350};find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved"})
-terrainPosition=nil;action=render()
+find(action,"Selector").onSelect(20);action=render();assert(#action.highlightedEntities==1)
 assert(find(action,"ActionTooltip").param.message.message:find("信号或路标",1,true))
-action.onBack();entities[10].objects={}
+action.onBack();entities[20].objects={}
 action=render();assert(not find(action,"EdgeRenderable"))
 
--- Two-point Escape resets; a second Escape exits and late callbacks stay dead.
+-- Every cancel route walks back 2 -> 1 -> 0. Pending length changes and old
+-- callbacks cannot reintroduce the discarded second point.
+local cancelCases={
+  function(a) input("IA_ABORT").fn() end,
+  function(a) input("IA_CLOSE_TOPMOST_WINDOW").fn() end,
+  function(a) find(a,"Selector").onProcessMouseEvent({type="Clicked",button=2}) end,
+  function(a) find(a,"Selector").onSelectSecondary() end,
+  function(a) a.onBack() end,
+}
+for _,cancel in ipairs(cancelCases) do
+  action=twoPoints();old=find(action,"ProposalViewer");checked(old,false)
+  terrainPosition={x=0,y=750};find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved"})
+  cancel(action);terrainPosition=nil;checked(old,false)
+  for _=1,4 do stepAll() end
+  action=render();assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"EdgeRenderable"))
+  assert(math.abs(markers(action)[1].position.y-350)<.001)
+  cancel(action);action=render();assert(#markers(action)==0 and #action.highlightedEntities==0 and options.mode==3)
+end
+
+action=twoPoints();revisions[20]=2;stepAll();action=render()
+assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"ProposalViewer"))
+revisions[20]=nil;action.onBack();action=render();assert(#markers(action)==0)
+
+-- Three Escapes from two points exit; late callbacks remain dead.
 action=twoPoints();old=find(action,"ProposalViewer")
 input("IA_CLOSE_TOPMOST_WINDOW").fn()
-action=render();assert(options.mode==3 and not find(action,"ProposalViewer") and not find(action,"EdgeRenderable"))
+action=render();assert(options.mode==3 and #markers(action)==1 and not find(action,"ProposalViewer"))
 checked(old,false);action=render();assert(not find(action,"EdgeRenderable"))
+input("IA_CLOSE_TOPMOST_WINDOW").fn();action=render();assert(#markers(action)==0)
 local oldSelector=find(action,"Selector")
 input("IA_CLOSE_TOPMOST_WINDOW").fn()
 assert(options.mode==1 and bound==nil)
@@ -338,6 +453,10 @@ for _=1,3 do stepAll();assert(bound==nil) end
 
 -- A running command is not cancelled midway; callbacks tolerate tool unmount.
 toolbar.changeParam(1,3);stepAll()
+action=render();selector=find(action,"Selector")
+selector.onProcessMouseEvent({x=0,y=350});selector.onSelect(10)
+revisions[10]=2;stepAll();action=render();assert(#markers(action)==0 and #action.highlightedEntities==0)
+revisions[10]=nil
 action=twoPoints();checked(find(action,"ProposalViewer"),false)
 action=render();local complete
 api.cmd.sendCommand=function(cmd,callback) built=cmd.p;complete=callback end
@@ -346,4 +465,4 @@ assert(input("IA_CLOSE_TOPMOST_WINDOW").state()==states.Inactive)
 action.onBack();assert(bound and options.mode==3)
 toolbar.changeParam(1,1);assert(bound==nil)
 complete({resultEntities={},proposal={proposal=built}},true)
-print("PASS: native menu, independent failed-plan rail outlines, delayed previews, Escape/reset/exit, expired callbacks and construction lifecycle")
+print("PASS: hover/snap markers, live second-point previews, progressive cancellation, stale callbacks, native parameters and guarded construction")
