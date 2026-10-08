@@ -43,7 +43,7 @@ local function Tool(params)
   local function refresh() if active() then tick:set(tick:old()+1) end end
   local function invalidate()
     s.serial = s.serial+1;s.ready = false;s.proposal = nil;s.price = nil;s.info = nil
-    s.segments = nil;s.renderEdges = nil;s.renderStatus = nil
+    s.segments = nil;s.renderEdges = nil;s.renderStatus = nil;s.renderError = nil
     s.previewChecked = false;s.previewValid = false;s.failed = false;s.previewMessage = nil;s.previewCost = nil
   end
   local function reset()
@@ -229,15 +229,23 @@ local function Tool(params)
     if s.renderStatus~=status then
       local color=status=="blocked" and api.type.Vec4f.new(1,0.2,0.15,0.9) or
         (status=="ready" and api.type.Vec4f.new(0.15,0.9,0.55,0.85) or api.type.Vec4f.new(0.2,0.7,1,0.85))
-      local ok,edges=pcall(previewUtil.make,s.segments,color)
+      local ok,edges,diagnostics=pcall(previewUtil.make,s.segments,color)
       s.renderEdges=ok and edges or nil;s.renderStatus=status
-      if not ok then log.message("[Rail Loop] Rail outline failed: "..errorMessage(edges)) end
+      s.renderError=not ok
+      if not ok then log.message("[Rail Loop] Rail outline failed: "..errorMessage(edges))
+      elseif s.loggedOutlineSerial~=s.serial then
+        s.loggedOutlineSerial=s.serial
+        log.message(string.format("[Rail Loop] Rail outline verified: serial=%d edges=%d first=(%.3f,%.3f,%.3f) last=(%.3f,%.3f,%.3f) sampleError=%.6f",
+          s.serial,#edges,diagnostics.first.x,diagnostics.first.y,diagnostics.first.z,
+          diagnostics.last.x,diagnostics.last.y,diagnostics.last.z,diagnostics.maxError))
+      end
     end
     if s.renderEdges then
       children[#children+1]=builtin.EdgeRenderable{edges=s.renderEdges,ignoreDepth=true}
     end
   end
   local message = s.message
+  if s.renderError then message=message.."\n轨迹预览未能显示，错误已记录。" end
   if s.info then message = message..string.format("\n长度 %.0f m",s.info.length) end
   children[#children+1] = builtin.ActionTooltip{
     recipe = constructionUtil.SimpleTooltipRecipe,
@@ -335,5 +343,5 @@ end
 
 local entry = react.RegisterPluginRecipe(entryPoint.ModEntryPointExtension,
   "XinNativeRailLoopEntry",function() return nil end)
-log.message("[Rail Loop] Native track mode installed (revision 4).")
+log.message("[Rail Loop] Native track mode installed (revision 5).")
 function data() return {entry=entry} end

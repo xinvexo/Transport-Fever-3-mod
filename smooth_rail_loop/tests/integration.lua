@@ -161,7 +161,22 @@ modules["::/gui/main/mod_entry_point.tl"]={ModEntryPointExtension={}}
 ug_require=require;resolve=function(x) return x end;log={message=function(message) logs[#logs+1]=message end}
 api.type.LayerConfig={new=function() return {} end}
 api.type.Vec2f={new=function(x,y) return {x=x,y=y} end}
-api.type.EdgeGeometry={Type={CUBIC_SPLINE="CUBIC_SPLINE"},new=function() return {cubicSpline={}} end}
+-- A native nested-value getter may return a copy. Ordinary Lua tables hid
+-- lost spline writes in the original preview tests.
+api.type.EdgeGeometry={Type={CUBIC_SPLINE="CUBIC_SPLINE"},CubicSpline={new=function() return {} end},new=function()
+  local values={cubicSpline={pos={v3(0,0,0),v3(0,0,0)},tangent={v3(0,0,0),v3(0,0,0)}}}
+  local function calcPos(self,u)
+    local c=values.cubicSpline
+    local p,t,dd=geometry.hermite(
+      {c.pos[1].x,c.pos[1].y,values.height.x},{c.pos[2].x,c.pos[2].y,values.height.y},
+      {c.tangent[1].x,c.tangent[1].y,values.tangent.x},{c.tangent[2].x,c.tangent[2].y,values.tangent.y},u)
+    return {v3(table.unpack(p)),v3(table.unpack(t)),v3(table.unpack(dd))}
+  end
+  return setmetatable({}, {
+    __index=function(_,key) if key=="calcPos" then return calcPos end;return copy(values[key]) end,
+    __newindex=function(_,key,value) values[key]=copy(value) end,
+  })
+end}
 api.gui.inputAction={InputActionState=states,modifierOnlyActionIsActive=function() return false end}
 local terrainPosition
 api.gui.mouse={Event={Type={Clicked="Clicked"}},hasTerrainPosition=function() return terrainPosition~=nil end,
@@ -244,6 +259,7 @@ action=twoPoints();local preview=find(action,"ProposalViewer")
 assert(preview and not enabled("IA_APPLY"))
 local outline=find(action,"EdgeRenderable");assert(outline and #outline.edges>2)
 assert(outline.edges[1].colors[1][3]==1)
+assert(table.concat(logs,"\n"):find("Rail outline verified:",1,true))
 local left,right=outline.edges[1].geometry,outline.edges[2].geometry
 assert(math.abs(left.cubicSpline.pos[1].x-right.cubicSpline.pos[1].x-1.5)<1e-6)
 assert(math.abs(left.cubicSpline.pos[1].y-350)<.001 and left.height.x==0)
