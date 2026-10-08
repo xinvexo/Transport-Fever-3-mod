@@ -1,0 +1,10 @@
+{
+  "modId": "xin_chinese_map_names_1",
+  "revision": 6,
+  "severityAdd": "Warning",
+  "severityRemove": "Warning",
+  "dependencies": [],
+  "incompatibilities": [],
+  "params": [],
+  "preRunScript": { "fileName": "xin_chinese_map_names_1::/mod.script@preRunFn" }
+}

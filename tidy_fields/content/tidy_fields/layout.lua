@@ -132,7 +132,7 @@ end
 
 function layout.plan(fieldConfig, params, canPlace, canConnect)
   local site = sites[fieldConfig.type]
-  if not site then return nil, "该工厂不支持整理地块。" end
+  if not site then return nil, "This industry does not support plot rearrangement." end
   local positions, sides, grid, columns, rows = candidates(fieldConfig, params)
   local modules = params.modules or {}
   local order = params.xinTidyFieldOrder or layout.makeOrder(modules, #fieldConfig.fields)
@@ -258,7 +258,7 @@ function layout.plan(fieldConfig, params, canPlace, canConnect)
   for _, id in ipairs(order) do
     if modules[id] then
       if not place(id, remaining) then
-        return nil, "所选方向没有足够与厂区相连的陆地容纳现有地块。"
+        return nil, "Not enough connected land in the selected directions for the existing plots."
       end
       remaining = remaining - 1
     end

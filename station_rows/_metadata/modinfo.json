@@ -1,17 +1,17 @@
 {
   "name": "Station Rows",
-  "summary": "Hold Shift to configure a complete railway station row.",
-  "description": "Hold Shift while configuring a vanilla railway station to fill empty positions in a row or remove a complete row of modules along the tracks.",
+  "summary": "Hold Shift to add or remove a whole row of railway station modules.",
+  "description": "Enable the mod and configure a vanilla modular passenger or cargo railway station. Select a track, platform, roof or attachment module, hold Shift and click an available slot to fill the row along the tracks. With the removal tool, hold Shift and click a module to remove the same type of module in that row. Release Shift for normal single-module actions. If you changed key bindings, use your precision-mode modifier.\n\nThe range follows the station's existing track/platform length and includes the clicked position. Occupied slots are skipped. Roofs and attachments are added only over existing passenger platforms; removing a platform also removes its roof and attachments. Non-longitudinal modules, such as station buildings, remain single-click operations.\n\nHovering shows the normal one-module preview. Row construction is performed module by module and stops if the game rejects a step.",
   "localization": {
     "en": {
       "name": "Station Rows",
-      "summary": "Hold Shift to configure a complete railway station row.",
-      "description": "Hold Shift while configuring a vanilla railway station to fill empty positions in a row or remove a complete row of modules along the tracks."
+      "summary": "Hold Shift to add or remove a whole row of railway station modules.",
+      "description": "Enable the mod and configure a vanilla modular passenger or cargo railway station. Select a track, platform, roof or attachment module, hold Shift and click an available slot to fill the row along the tracks. With the removal tool, hold Shift and click a module to remove the same type of module in that row. Release Shift for normal single-module actions. If you changed key bindings, use your precision-mode modifier.\n\nThe range follows the station's existing track/platform length and includes the clicked position. Occupied slots are skipped. Roofs and attachments are added only over existing passenger platforms; removing a platform also removes its roof and attachments. Non-longitudinal modules, such as station buildings, remain single-click operations.\n\nHovering shows the normal one-module preview. Row construction is performed module by module and stops if the game rejects a step."
     },
     "zh_CN": {
       "name": "车站整列配置",
-      "summary": "按住 Shift，一次配置火车站的一整列。",
-      "description": "配置原版火车站时，按住 Shift 补齐沿铁轨方向一列的空位，或删除一整列模块。"
+      "summary": "按住Shift，整列增删原版火车站轨道、站台和附属模块。",
+      "description": "启用后，配置原版模块化客运或货运火车站。选择轨道、站台、顶棚或附属模块，按住Shift点击可建槽位，沿铁轨方向补齐整列。使用删除工具时，按住Shift点击模块，删除同列的同类模块。松开Shift恢复逐块操作；修改过按键绑定时，以“精确模式”修饰键为准。\n\n添加范围以车站现有轨道和站台的纵向长度为界，包含点击位置并跳过已占用槽位。顶棚和附属模块仅补在已有客运站台上；删除站台时同时删除顶棚及附属模块。站房等非纵向模块仍为单点操作。\n\n悬停显示原版单块预览。整列施工逐块完成，某一步被游戏拒绝时停止后续操作。"
     }
   },
   "authors": [

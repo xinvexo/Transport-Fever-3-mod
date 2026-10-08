@@ -1,3 +1,4 @@
+import math
 import unittest
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,8 @@ class TrackWorld:
         self.hosts = {}
         self.signals = {}
         self.lengths = {}
+        self.node_positions = {}
+        self.transport_opposite = {}
         self.lua.execute("""
             local function clone(value)
                 if type(value) ~= "table" then return value end
@@ -27,12 +30,17 @@ class TrackWorld:
                 return copy
             end
             cloneBaseEdge = clone
+            warnings = {}
+            log = { warning = function(message) warnings[#warnings+1] = message end }
             api = {
                 type = {
                     ComponentType = setmetatable({}, {
                         __index = function(_, key) return key end
                     }),
-                    enum = { EdgeObjectType = { SIGNAL = "signal" } },
+                    enum = {
+                        EdgeObjectType = { SIGNAL = "signal" },
+                        RoadType = { TRACK = "TRACK" },
+                    },
                     Signal = { Type = {
                         SIGNAL = "path", ONE_WAY_SIGNAL = "one_way", WAYPOINT = "waypoint"
                     } },
@@ -47,9 +55,9 @@ class TrackWorld:
                 },
                 engine = {
                     system = {
-                        streetSystem = {}, streetConnectorSystem = {}, signalSystem = {}
+                        streetSystem = {}, streetConnectorSystem = {}, signalSystem = {},
                     },
-                    util = { getPlayer = function() return 7 end },
+                    util = { getPlayer = function() return 7 end, transport = {} },
                 },
                 res = { constructionRep = {} },
             }
@@ -73,20 +81,29 @@ class TrackWorld:
             lambda entity: self.hosts.get(entity, -1)
         )
         api.engine.system.signalSystem.getSignal = self.get_signal
+        api.engine.util.transport.calcPosition = self.transport_position
         spacing = self.lua.execute((ROOT / "content/auto_signal/spacing.lua").read_text(encoding="utf-8"))
-        self.lua.globals().ug_require = lambda path: spacing
+        geometry = self.lua.execute((ROOT / "content/auto_signal/geometry.lua").read_text(encoding="utf-8"))
+        self.lua.globals().ug_require = lambda path: geometry if path.endswith("geometry.lua") else spacing
         self.network = self.lua.execute((ROOT / "content/auto_signal/network.lua").read_text(encoding="utf-8"))
 
     def table(self, value):
         return self.lua.table_from(value, recursive=True)
 
     def add_edge(self, entity, node0, node1, length, owner=None):
+        if node0 not in self.node_positions:
+            self.node_positions[node0] = self.node_positions.get(node1, -length) + length
+        if node1 not in self.node_positions:
+            self.node_positions[node1] = self.node_positions[node0] + length
         self.components[entity, "BASE_EDGE"] = self.table({
             "node0": node0, "node1": node1, "objects": [],
             "roadType": "TRACK", "roadTemplate": "standard_track",
+            "laneConfigs": [{"width": 5}],
             "tangent0": [length, 0, 0], "tangent1": [length, 0, 0],
         })
         self.components[entity, "BASE_EDGE"].clone = self.lua.globals().cloneBaseEdge
+        self.set_geometry(entity, (self.node_positions[node0], 0, 0),
+                          (self.node_positions[node1], 0, 0))
         self.components[entity, "PLAYER_OWNED"] = self.table({"player": 7})
         self.connections[node0].append(entity)
         self.connections[node1].append(entity)
@@ -95,10 +112,57 @@ class TrackWorld:
         if owner is not None:
             self.owners[entity] = owner
 
+    def set_geometry(self, entity, start, end, tangent0=None, tangent1=None):
+        base = self.components[entity, "BASE_EDGE"]
+        tangent = tuple(b-a for a, b in zip(start, end))
+        for key, vector in (("position0", start), ("position1", end),
+                            ("tangent0", tangent0 or tangent), ("tangent1", tangent1 or tangent)):
+            base[key] = self.table(dict(zip(("x", "y", "z"), vector)))
+        if (entity, "TRANSPORT_NETWORK") in self.components:
+            self.set_transport_edges(entity, len(self.components[entity, "TRANSPORT_NETWORK"].edges))
+
+    def world_position(self, entity, t):
+        base = self.components[entity, "BASE_EDGE"]
+        return tuple((2*t**3-3*t*t+1)*base.position0[axis]
+                     + (t**3-2*t*t+t)*base.tangent0[axis]
+                     + (-2*t**3+3*t*t)*base.position1[axis]
+                     + (t**3-t*t)*base.tangent1[axis] for axis in ("x", "y", "z"))
+
+    def transport_position(self, data, t):
+        p = self.world_position(data.entity, data.first+(data.last-data.first)*t)
+        return self.table(dict(zip(("x", "y", "z"), p)))
+
+    def set_transport_opposite(self, entity, opposite):
+        # Native mission guarantees alignment for one lane only. Exercise the
+        # general case with multiple lane configurations and independent TN order.
+        self.components[entity, "BASE_EDGE"].laneConfigs = self.table([{"width": 2.5}, {"width": 2.5}])
+        self.transport_opposite[entity] = opposite
+        self.set_transport_edges(entity, len(self.components[entity, "TRANSPORT_NETWORK"].edges))
+
+    def add_road(self, entity, node, width=18, angle=90):
+        other = entity + 100000
+        self.add_edge(entity, node, other, 100)
+        self.connections[node].remove(entity)
+        self.connections[other].remove(entity)
+        self.street_connections[node].append(entity)
+        self.street_connections[other].append(entity)
+        base = self.components[entity, "BASE_EDGE"]
+        base.roadType = "STREET"
+        base.laneConfigs = self.table([{"width": width/2}, {"width": width/2}])
+        x = self.node_positions[node]
+        radians = math.radians(angle)
+        self.set_geometry(entity, (x, 0, 0), (x+100*math.cos(radians), 100*math.sin(radians), 0))
+
     def set_transport_edges(self, entity, count):
+        entries = []
+        for index in range(count):
+            first, last = index/count, (index+1)/count
+            if self.transport_opposite.get(entity):
+                first, last = last, first
+            entries.append({"geometry": {"length": self.lengths[entity]/count,
+                                          "entity": entity, "first": first, "last": last}})
         self.components[entity, "TRANSPORT_NETWORK"] = self.table({
-            "edges": [{"geometry": {"length": self.lengths[entity] / count}}
-                      for _ in range(count)]
+            "edges": entries
         })
 
     def add_signal(self, entity, edge, reversed=False, kind="path", fraction=0.25):
@@ -124,8 +188,8 @@ class TrackWorld:
         entity = self.signals.get((edge_id.entity, edge_id.index, reversed), -1)
         return self.table({"entity": entity, "index": 0})
 
-    def plan(self, signal, minimum=300):
-        result = self.network.plan(signal, minimum)
+    def plan(self, signal, gap=300):
+        result = self.network.plan(signal, gap)
         if isinstance(result, tuple):
             raise AssertionError(f"Planning failed: {result[1]}")
         return result
@@ -154,6 +218,72 @@ class NetworkTests(unittest.TestCase):
         self.world.add_edge(102, 30, 20, 300)
         self.world.add_edge(103, 30, 40, 350)
 
+    def assert_northbound_world_layout(self, world, plan):
+        proposal = world.network.proposal(plan).streetProposal
+        edge_map = {-index: step.edge for index, step in enumerate(sequence(plan.steps), 1)}
+        positions = []
+        for obj in sequence(proposal.edgeObjectsToAdd):
+            entity = edge_map[obj.edgeEntity]
+            positions.append(world.world_position(entity, obj.param)[1])
+            base = world.components[entity, "BASE_EDGE"]
+            # The native mission's direction check uses left = not forward.
+            heading_y = (base.position1.y-base.position0.y) * (-1 if obj.left else 1)
+            self.assertGreater(heading_y, 0, "Generated signal must still face north")
+        for actual, expected in zip(sorted(positions), [149, 449, 749, 1049]):
+            self.assertAlmostEqual(actual, expected)
+        self.assertEqual(len(positions), 4)
+
+    def test_northbound_lane_keeps_heading_and_anchors_before_north_junction(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        self.world.add_signal(1001, 101, False)
+        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
+
+    def test_opposite_transport_geometry_does_not_reverse_upbound_anchor(self):
+        for nodes in ((10, 90), (90, 10)):
+            with self.subTest(nodes=nodes):
+                world = TrackWorld()
+                world.add_edge(101, *nodes, 1050)
+                world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+                world.set_transport_opposite(101, True)  # transport runs south
+                world.add_signal(1001, 101, True)  # requested opposite: north
+                self.assert_northbound_world_layout(world, world.plan(1001))
+
+    def test_mixed_base_and_transport_directions_preserve_same_world_heading(self):
+        self.make_open_section()
+        self.world.set_geometry(101, (0, 0, 0), (0, 400, 0))
+        self.world.set_geometry(102, (0, 700, 0), (0, 400, 0))
+        self.world.set_geometry(103, (0, 700, 0), (0, 1050, 0))
+        for edge, opposite in ((101, True), (102, True), (103, False)):
+            self.world.set_transport_opposite(edge, opposite)
+        self.world.add_signal(1001, 101, True)
+        self.world.add_signal(1002, 102, False)
+        self.world.add_signal(1003, 103, False)
+        self.world.add_signal(1101, 102, True)  # physically southbound: keep it
+        for seed in (1001, 1002, 1003):
+            plan = self.world.plan(seed)
+            self.assertEqual(removals(plan), {1001, 1002, 1003})
+            self.assert_northbound_world_layout(self.world, plan)
+
+    def test_transport_subedges_are_calibrated_independently(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        self.world.set_transport_opposite(101, True)
+        self.world.add_signal(1001, 101, True)
+        self.world.add_signal(1002, 101, True)
+        self.world.add_signal(1101, 101, False)
+        for seed in (1001, 1002):
+            plan = self.world.plan(seed)
+            self.assertEqual(removals(plan), {1001, 1002})
+            self.assert_northbound_world_layout(self.world, plan)
+
+    def test_single_lane_uses_native_direction_contract_without_spatial_api(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        self.world.add_signal(1001, 101, False)
+        self.world.lua.execute("api.engine.util.transport = nil")
+        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
+
     def test_corridor_follows_the_whole_section_with_mixed_node_order(self):
         self.make_open_section()
         for seed in (101, 102, 103):
@@ -179,32 +309,6 @@ class NetworkTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("construction", reason)
 
-    def test_signal_replacement_respects_route_direction(self):
-        self.make_open_section()
-        self.world.add_signal(1001, 101, False, "one_way")
-        self.world.add_signal(1002, 102, True)
-        self.world.add_signal(1003, 103, False)
-        self.world.add_signal(1101, 102, False)
-        self.world.add_signal(1102, 103, True)
-        plan = self.world.plan(1001)
-        self.assertEqual(removals(plan), {1001, 1002, 1003})
-        self.assertEqual([step.left for step in sequence(plan.steps)], [True, False, True])
-        self.assertTrue(plan.oneWay)
-        self.assertEqual(plan.count, 4)
-        positions = []
-        for step in sequence(plan.steps):
-            for fraction in sequence(step.positions):
-                if step.edge == 101:
-                    positions.append(400 * fraction)
-                elif step.edge == 102:
-                    positions.append(400 + 300 * (1 - fraction))
-                else:
-                    positions.append(700 + 350 * fraction)
-        self.assertAlmostEqual(positions[0], 10)
-        self.assertAlmostEqual(positions[-1], 1040)
-        for before, after in zip(positions, positions[1:]):
-            self.assertGreaterEqual(after - before, 300)
-
     def test_layout_is_independent_of_the_clicked_signal(self):
         self.make_open_section()
         self.world.add_signal(1001, 101, False, fraction=0.2)
@@ -221,129 +325,7 @@ class NetworkTests(unittest.TestCase):
         self.world.add_signal(1003, 103, True)
         plan = self.world.plan(1002)
         self.assertEqual(removals(plan), {1002, 1003})
-        self.assertEqual([step.left for step in sequence(plan.steps)], [False, True, False])
-
-    def test_loop_has_stable_layout_and_minimum_gap_across_the_seam(self):
-        self.world.add_edge(101, 10, 20, 350)
-        self.world.add_edge(102, 30, 20, 350)
-        self.world.add_edge(103, 30, 10, 350)
-        self.world.add_signal(1001, 101, False)
-        self.world.add_signal(1002, 102, True)
-        self.world.add_signal(1003, 103, False)
-        for edge in (101, 102, 103):
-            segments, closed = self.world.network.corridor(edge)
-            self.assertTrue(closed)
-            self.assertEqual(len(segments), 3)
-        first = self.world.plan(1001)
-        self.assertEqual(first.count, 3)
-        self.assertEqual(layout(first), layout(self.world.plan(1002)))
-        self.assertEqual(layout(first), layout(self.world.plan(1003)))
-        positions = []
-        for step in sequence(first.steps):
-            for fraction in sequence(step.positions):
-                if step.edge == 101:
-                    positions.append(350 * fraction)
-                elif step.edge == 102:
-                    positions.append(350 + 350 * (1 - fraction))
-                else:
-                    positions.append(700 + 350 * fraction)
-        gaps = [after - before for before, after in zip(positions, positions[1:])]
-        gaps.append(1050 - positions[-1] + positions[0])
-        self.assertTrue(all(gap >= 300 for gap in gaps))
-
-    def test_short_section_places_one_signal_at_its_center(self):
-        self.world.add_edge(101, 10, 20, 100)
-        self.world.add_signal(1001, 101, fraction=0.1)
-        plan = self.world.plan(1001)
-        self.assertEqual(plan.count, 1)
-        self.assertAlmostEqual(plan.steps[1].positions[1], 0.5)
-        self.assertEqual(removals(plan), {1001})
-
-    def test_road_crossing_clearance_is_kept_for_both_spacing_choices(self):
-        # With only joint clearance, 226 m spacing puts a signal at 462 m,
-        # just 2 m beyond the road crossing at 460 m.
-        self.world.add_edge(101, 10, 20, 460)
-        self.world.add_edge(102, 20, 30, 550)
-        self.world.add_edge(103, 30, 40, 366)
-        self.world.street_connections[20] = [9001, 9002]
-        self.world.crossing_clearance = 20
-        self.world.add_signal(1001, 101)
-        offsets = {101: 0, 102: 460, 103: 1010}
-        for minimum, expected_count in [(100, 14), (226, 6)]:
-            with self.subTest(minimum=minimum):
-                plan = self.world.plan(1001, minimum)
-                positions = [
-                    offsets[step.edge] + fraction * self.world.lengths[step.edge]
-                    for step in sequence(plan.steps)
-                    for fraction in sequence(step.positions)
-                ]
-                self.assertEqual(len(positions), expected_count)
-                self.assertAlmostEqual(positions[0], 10)
-                self.assertAlmostEqual(positions[-1], 1366)
-                for position in positions:
-                    self.assertGreaterEqual(abs(position - 460), 20 - 1e-8)
-                for before, after in zip(positions, positions[1:]):
-                    self.assertGreaterEqual(after - before, minimum - 1e-8)
-
-    def test_crossing_clearance_extends_across_short_adjacent_segments(self):
-        self.world.add_edge(101, 10, 20, 300)
-        self.world.add_edge(102, 20, 30, 5)
-        self.world.add_edge(103, 30, 40, 5)
-        self.world.add_edge(104, 40, 50, 730)
-        self.world.street_connections[20] = [9001, 9002]
-        self.world.crossing_clearance = 35
-        self.world.add_signal(1001, 104)
-        offsets = {101: 0, 102: 300, 103: 305, 104: 310}
-        plan = self.world.plan(1001, 100)
-        positions = [
-            offsets[step.edge] + fraction * self.world.lengths[step.edge]
-            for step in sequence(plan.steps)
-            for fraction in sequence(step.positions)
-        ]
-        self.assertEqual(len(positions), 10)
-        self.assertAlmostEqual(positions[0], 10)
-        self.assertAlmostEqual(positions[-1], 1030)
-        for position in positions:
-            self.assertGreaterEqual(abs(position - 300), 35 - 1e-8)
-        for before, after in zip(positions, positions[1:]):
-            self.assertGreaterEqual(after - before, 100 - 1e-8)
-
-    def test_loop_crossing_clearance_wraps_across_the_section_origin(self):
-        self.world.add_edge(101, 10, 20, 200)
-        self.world.add_edge(102, 20, 30, 200)
-        self.world.add_edge(103, 30, 10, 200)
-        self.world.street_connections[10] = [9001, 9002]
-        self.world.crossing_clearance = 150
-        self.world.add_signal(1001, 101)
-        offsets = {101: 0, 102: 200, 103: 400}
-        plan = self.world.plan(1001, 100)
-        positions = [
-            offsets[step.edge] + fraction * self.world.lengths[step.edge]
-            for step in sequence(plan.steps)
-            for fraction in sequence(step.positions)
-        ]
-        self.assertEqual(len(positions), 4)
-        for position in positions:
-            self.assertGreaterEqual(min(position, 600 - position), 150 - 1e-8)
-        gaps = [after - before for before, after in zip(positions, positions[1:])]
-        gaps.append(600 - positions[-1] + positions[0])
-        self.assertTrue(all(gap >= 100 - 1e-8 for gap in gaps))
-
-    def test_two_arc_loop_has_the_same_layout_from_either_seed(self):
-        self.world.add_edge(101, 10, 20, 525)
-        self.world.add_edge(102, 10, 20, 525)
-        upper = self.world.components[101, "BASE_EDGE"]
-        lower = self.world.components[102, "BASE_EDGE"]
-        upper.tangent0 = self.world.table({"x": 200, "y": 300, "z": 0})
-        upper.tangent1 = self.world.table({"x": 200, "y": -300, "z": 0})
-        lower.tangent0 = self.world.table({"x": 200, "y": -300, "z": 0})
-        lower.tangent1 = self.world.table({"x": 200, "y": 300, "z": 0})
-        self.world.add_signal(1001, 101, False)
-        self.world.add_signal(1002, 102, True)
-        first = self.world.plan(1001)
-        second = self.world.plan(1002)
-        self.assertEqual(first.count, 3)
-        self.assertEqual(layout(first), layout(second))
+        self.assertEqual([step.left for step in sequence(plan.steps)], [True, False, True])
 
     def test_proposal_preserves_reverse_signals_and_other_track_objects(self):
         self.world.add_edge(101, 10, 20, 700)
@@ -366,7 +348,7 @@ class NetworkTests(unittest.TestCase):
         for added in sequence(proposal.edgeObjectsToAdd):
             self.assertEqual(added.edgeEntity, replacement.entity)
             self.assertTrue(added.oneWay)
-            self.assertTrue(added.left)
+            self.assertFalse(added.left)
             self.assertEqual(added.model, plan.model)
             self.assertGreater(added.param, 0)
             self.assertLess(added.param, 1)
@@ -383,6 +365,194 @@ class NetworkTests(unittest.TestCase):
         proposal = self.world.network.proposal(plan).streetProposal
         retained = {obj[1] for obj in sequence(proposal.edgesToAdd[1].comp.objects)}
         self.assertIn(2001, retained)
+
+    def test_1050_meter_section_uses_exact_gap_from_forward_endpoint(self):
+        self.make_open_section()
+        self.world.add_signal(1001, 101, False, "one_way", fraction=0.5)
+        self.world.add_signal(1002, 102, True)
+        self.world.add_signal(1101, 102, False)
+        plan = self.world.plan(1001, 300)
+        self.assertEqual(sequence(plan.positions), [149, 449, 749, 1049])
+        self.assertEqual(removals(plan), {1001, 1002})
+        self.assertTrue(plan.oneWay)
+        self.assertEqual([step.left for step in sequence(plan.steps)], [False, True, False])
+        physical = []
+        for step in sequence(plan.steps):
+            for fraction in sequence(step.positions):
+                physical.append(
+                    400*fraction if step.edge == 101 else
+                    400+300*(1-fraction) if step.edge == 102 else 700+350*fraction
+                )
+        for actual, expected in zip(physical, sequence(plan.positions)):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_reverse_direction_anchors_at_the_other_endpoint(self):
+        self.make_open_section()
+        self.world.add_signal(1001, 101, True)
+        self.world.add_signal(1002, 102, False)
+        first = self.world.plan(1001, 300)
+        self.assertEqual(sequence(first.positions), [1, 301, 601, 901])
+        self.assertEqual(layout(first), layout(self.world.plan(1002, 300)))
+
+    def test_clicked_500_meter_position_is_only_a_trigger(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101, fraction=500/1050)
+        plan = self.world.plan(1001, 200)
+        self.assertEqual(sequence(plan.positions), [49, 249, 449, 649, 849, 1049])
+        self.assertNotIn(500, sequence(plan.positions))
+        self.assertEqual(removals(plan), {1001})
+
+    def test_short_section_has_one_signal_at_directional_end(self):
+        self.world.add_edge(101, 10, 20, 100)
+        self.world.add_signal(1001, 101)
+        self.world.add_signal(1002, 101, True)
+        self.assertEqual(sequence(self.world.plan(1001).positions), [99])
+        self.assertEqual(sequence(self.world.plan(1002).positions), [1])
+
+    def test_regular_edge_joints_do_not_restart_spacing(self):
+        self.world.add_edge(101, 10, 20, 20)
+        self.world.add_edge(102, 30, 20, 60)
+        self.world.add_edge(103, 30, 40, 40)
+        self.world.add_signal(1001, 101)
+        plan = self.world.plan(1001, 50)
+        self.assertEqual(sequence(plan.positions), [19, 69, 119])
+        middle = next(step for step in sequence(plan.steps) if step.edge == 102)
+        self.assertAlmostEqual(middle.positions[1], 1-49/60)
+
+    def test_fixed_position_on_ordinary_joint_is_not_moved_or_duplicated(self):
+        self.world.add_edge(101, 10, 20, 449)
+        self.world.add_edge(102, 20, 30, 601)
+        self.world.add_signal(1001, 101)
+        plan = self.world.plan(1001, 300)
+        self.assertEqual(sequence(plan.positions), [149, 449, 749, 1049])
+        self.assertEqual(sum(len(step.positions) for step in sequence(plan.steps)), 4)
+        self.assertEqual(plan.steps[1].positions[2], 1)
+
+    def test_road_crossing_moves_target_and_counts_next_gap_from_it(self):
+        self.world.add_edge(101, 10, 20, 450)
+        self.world.add_edge(102, 20, 30, 600)
+        self.world.add_road(9001, 20)
+        self.world.crossing_clearance = 20
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001, 300).positions), [130, 430, 749, 1049])
+
+    def test_resource_clearance_can_move_a_blocked_first_light(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_road(9001, 20)
+        self.world.crossing_clearance = 20
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001, 300).positions), [130, 430, 730, 1030])
+
+    def test_no_space_or_excessive_signal_count_preserves_seed(self):
+        self.world.add_edge(101, 10, 20, 2000)
+        self.world.add_signal(1001, 101)
+        plan, reason = self.world.network.plan(1001, 1)
+        self.assertIsNone(plan)
+        self.assertIn("count limit", reason)
+        self.world.crossing_clearance = 3000
+        self.world.add_road(9001, 10)
+        plan, reason = self.world.network.plan(1001, 300)
+        self.assertIsNone(plan)
+        self.assertIn("no room", reason)
+        self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
+
+    def test_native_signal_without_declared_clearance_still_avoids_road_width(self):
+        self.world.add_edge(101, 10, 20, 749)
+        self.world.add_edge(102, 20, 30, 301)
+        self.world.add_road(9001, 20, width=18)
+        self.world.add_signal(1001, 101)
+        segments, closed = self.world.network.corridor(101)
+        self.assertFalse(closed)
+        self.assertEqual(len(segments), 2)
+        plan = self.world.plan(1001)
+        self.assertEqual(sequence(plan.positions), [139, 439, 739, 1049])
+        self.assertEqual(plan.count, 4)
+
+    def test_wide_and_skew_roads_use_their_actual_width_and_angle(self):
+        self.world.add_edge(101, 10, 20, 749)
+        self.world.add_edge(102, 20, 30, 301)
+        self.world.add_road(9001, 20, width=40)
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001).positions), [128, 428, 728, 1049])
+        road = self.world.components[9001, "BASE_EDGE"]
+        road.laneConfigs = self.world.table([{"width": 10}, {"width": 10}])
+        self.world.set_geometry(9001, (749, 0, 0), (849, 100, 0))
+        self.assertEqual(sequence(self.world.plan(1001).positions), [133, 433, 733, 1049])
+
+    def test_road_width_native_vector_matches_native_script_access(self):
+        self.world.add_edge(101, 10, 20, 749)
+        self.world.add_edge(102, 20, 30, 301)
+        self.world.add_road(9001, 20, width=18)
+        self.world.components[9001, "BASE_EDGE"].laneConfigs = None
+        self.world.components[9001, "BASE_EDGE"].laneConfigs_native = self.world.lua.eval("""
+            { size = function() return 4 end,
+              at = function(_, index) return { width = ({3, 6, 6, 3})[index] } end }
+        """)
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001).positions), [139, 439, 739, 1049])
+
+    def test_reverse_direction_moves_past_the_crossing_in_reverse_placement_order(self):
+        self.world.add_edge(101, 10, 20, 301)
+        self.world.add_edge(102, 30, 20, 749)
+        self.world.add_road(9001, 20, width=18)
+        self.world.add_signal(1001, 101, True)
+        self.world.add_signal(1002, 102, False)
+        plan = self.world.plan(1001)
+        self.assertEqual(sequence(plan.positions), [1, 311, 611, 911])
+        self.assertEqual(layout(plan), layout(self.world.plan(1002)))
+
+    def test_road_bridge_with_separate_nodes_does_not_change_ground_signal_positions(self):
+        self.world.add_edge(101, 10, 20, 749)
+        self.world.add_edge(102, 20, 30, 301)
+        self.world.add_road(9001, 40, width=40)
+        self.world.set_geometry(9001, (749, -50, 10), (749, 50, 10))
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001).positions), [149, 449, 749, 1049])
+
+    def test_neighbouring_tracks_do_not_move_signal_positions(self):
+        self.world.add_edge(101, 10, 20, 100)
+        self.world.add_edge(102, 30, 40, 100)
+        self.world.set_geometry(102, (0, 2.5, 0), (100, 2.5, 0))
+        self.world.add_signal(1001, 101)
+        self.assertEqual(sequence(self.world.plan(1001, 50).positions), [49, 99])
+
+    def test_closed_track_has_no_endpoint_and_keeps_original_signals(self):
+        self.world.add_edge(101, 10, 20, 350)
+        self.world.add_edge(102, 20, 30, 350)
+        self.world.add_edge(103, 30, 10, 350)
+        self.world.add_signal(1001, 101)
+        segments, closed = self.world.network.corridor(101)
+        self.assertTrue(closed)
+        self.assertEqual(len(segments), 3)
+        plan, reason = self.world.network.plan(1001, 300)
+        self.assertIsNone(plan)
+        self.assertIn("no forward endpoint", reason)
+        self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
+
+    def test_two_arc_closed_track_is_also_left_unchanged(self):
+        self.world.add_edge(101, 10, 20, 500)
+        self.world.add_edge(102, 10, 20, 500)
+        self.world.add_signal(1001, 101)
+        self.world.add_signal(1002, 102)
+        for signal in (1001, 1002):
+            plan, reason = self.world.network.plan(signal, 300)
+            self.assertIsNone(plan)
+            self.assertIn("no forward endpoint", reason)
+
+    def test_actual_positions_on_nonuniform_spline_keep_meter_spacing(self):
+        self.world.add_edge(101, 10, 20, 100)
+        self.world.set_geometry(101, (0, 0, 0), (100, 0, 0), (10, 0, 0), (100, 0, 0))
+        self.world.add_signal(1001, 101)
+        plan = self.world.plan(1001, 25)
+        proposal = self.world.network.proposal(plan)
+        actual = []
+        for obj in sequence(proposal.streetProposal.edgeObjectsToAdd):
+            t = obj.param
+            actual.append(100*(-2*t**3+3*t**2)+10*(t**3-2*t**2+t)+100*(t**3-t**2))
+        for got, expected in zip(actual, [24, 49, 74, 99]):
+            self.assertAlmostEqual(got, expected, delta=0.01)
+        for a, b in zip(actual, actual[1:]):
+            self.assertAlmostEqual(b-a, 25, delta=0.02)
 
 
 if __name__ == "__main__":

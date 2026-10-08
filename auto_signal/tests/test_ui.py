@@ -57,9 +57,10 @@ class SignalUiTests(unittest.TestCase):
             self.assertEqual(enabled.defaultIndex, 2)
             self.assertEqual(spacing.key, "asMinimumSpacing")
             self.assertEqual(spacing.uiType, "Slider")
+            self.assertEqual(spacing.name, "Signal spacing")
             self.assertEqual(spacing.numbers[spacing.defaultIndex], 300)
-            self.assertEqual(len(spacing.numbers), 1951)
-            for index in range(1, 1952):
+            self.assertEqual(len(spacing.numbers), 751)
+            for index in range(1, 752):
                 self.assertEqual(spacing.numbers[index], index + 49)
 
     def test_other_constructions_keep_their_parameters(self):
@@ -80,8 +81,8 @@ class SignalUiTests(unittest.TestCase):
         self.assertEqual(self.ui.formatMinimumSpacing(None, 300), "300 m")
         self.assertEqual(self.ui.stepMinimumSpacing(None, 300, 1), 350)
         self.assertEqual(self.ui.stepMinimumSpacing(None, 300, -1), 250)
-        self.assertEqual(self.ui.stepMinimumSpacing(None, 50, -1), 50)
-        self.assertEqual(self.ui.stepMinimumSpacing(None, 2000, 1), 2000)
+        self.assertEqual(self.ui.stepMinimumSpacing(None, 50, -1), 1)
+        self.assertEqual(self.ui.stepMinimumSpacing(None, 2000, 1), 2050)
 
     def test_localized_labels_and_units(self):
         for language, label, unit in (
@@ -92,6 +93,11 @@ class SignalUiTests(unittest.TestCase):
             self.set_language(language)
             self.assertEqual(self.signal_params()[2].name, label)
             self.assertEqual(self.ui.formatMinimumSpacing(None, 300), unit)
+
+    def test_large_integer_format_does_not_overflow_lua52_percent_d(self):
+        for value in (2147483648, 4503599627370497, 2**53-1):
+            with self.subTest(value=value):
+                self.assertEqual(self.ui.formatMinimumSpacing(None, value), f"{value} m")
 
 
 if __name__ == "__main__":

@@ -20,14 +20,14 @@ function data()
             }
 
             local values, numbers = {}, {}
-            for meters = 50, 2000 do
+            for meters = 50, 800 do
                values[#values + 1] = tostring(meters)
                numbers[#numbers + 1] = meters
             end
             constructionData.params[#constructionData.params + 1] = {
                key = "asMinimumSpacing",
-               name = _("Minimum spacing"),
-               tooltip = _("Spacing will not be shorter."),
+               name = _("Signal spacing"),
+               tooltip = _("Place signals at this exact interval."),
                values = values,
                numbers = numbers,
                uiType = "Slider",

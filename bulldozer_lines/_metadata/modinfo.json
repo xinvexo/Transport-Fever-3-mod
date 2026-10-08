@@ -1,0 +1,27 @@
+{
+  "name": "Lines While Bulldozing",
+  "summary": "See routes and a compact line checklist while using the bulldozer.",
+  "description": "Enable the mod and open the normal bulldozer with B or your configured shortcut. A compact line list opens on the left while routes appear on the map. Search the list, combine transport-mode filters, restrict it to the visible area, and use each line's locate button to move the camera.\n\nSelect one or more lines to show only those routes. With no selection, the map shows the filtered results. The top checkbox selects the current list or clears the selection. Search keeps your selected lines. The panel can be dragged; closing it exits bulldozer mode, and leaving bulldozer mode closes it.\n\nBuildings are green for residential, blue for commercial and yellow for industrial use. Other data layers take precedence while enabled. Map clicks still perform normal demolition. The panel does not edit/delete lines or manage vehicles; the regular line manager stays available. Applies to the normal bulldozer, not the station-module removal tool.\n\nCover art illustrates the function; actual appearance is determined by the game.",
+  "localization": {
+    "en": {
+      "name": "Lines While Bulldozing",
+      "summary": "See routes and a compact line checklist while using the bulldozer.",
+      "description": "Enable the mod and open the normal bulldozer with B or your configured shortcut. A compact line list opens on the left while routes appear on the map. Search the list, combine transport-mode filters, restrict it to the visible area, and use each line's locate button to move the camera.\n\nSelect one or more lines to show only those routes. With no selection, the map shows the filtered results. The top checkbox selects the current list or clears the selection. Search keeps your selected lines. The panel can be dragged; closing it exits bulldozer mode, and leaving bulldozer mode closes it.\n\nBuildings are green for residential, blue for commercial and yellow for industrial use. Other data layers take precedence while enabled. Map clicks still perform normal demolition. The panel does not edit/delete lines or manage vehicles; the regular line manager stays available. Applies to the normal bulldozer, not the station-module removal tool.\n\nCover art illustrates the function; actual appearance is determined by the game."
+    },
+    "zh_CN": {
+      "name": "拆除时查看线路",
+      "summary": "打开推土机时显示路线与紧凑线路清单，勾选后只显示所选线路。",
+      "description": "启用模组后，按B或当前配置的快捷键打开普通推土机，左侧会显示紧凑线路清单，地图显示路线。支持搜索、运输方式多选、只显示可视范围，以及通过线路右侧的定位按钮移动镜头。\n\n勾选一条或多条线路后，地图仅显示所选线路；未勾选时显示筛选结果。顶部复选框可全选当前列表或取消全部勾选。搜索不会清除已选线路。清单可以拖动；关闭清单会退出推土机，退出推土机也会关闭清单。\n\n房屋按住宅绿色、商业蓝色、工业黄色显示；手动启用其他数据图层时，以该图层为准。地图点击仍执行原版拆除，清单不提供线路编辑、删除或车辆管理，原版线路管理器仍可正常使用。仅适用于普通推土机，不用于车站模块删除工具。\n\n封面为功能示意，实际画面以游戏内为准。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

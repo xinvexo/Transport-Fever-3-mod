@@ -31,9 +31,9 @@ local supported = {
 function proposal.describeFailure(data)
   local errors = data and data.errorState
   if errors and errors.messages and errors.messages[1] then
-    return "无法整理：" .. errors.messages[1]
+    return string.format(_("Could not tidy: %s"), errors.messages[1])
   end
-  return "原版施工检查未通过，具体原因请查看游戏日志。"
+  return _("The game rejected construction. See the game log for details.")
 end
 
 local function pointOnLand(x, y, transform)
@@ -87,13 +87,13 @@ function proposal.make(entity, mode)
   for _, option in ipairs(proposal.layouts) do
     if option.value == mode then valid = true; break end
   end
-  if not valid then return nil, nil, "请选择地块布局。" end
-  if not api.engine.entityExists(entity) then return nil, nil, "工厂已不存在。" end
+  if not valid then return nil, nil, _("Select a plot layout.") end
+  if not api.engine.entityExists(entity) then return nil, nil, _("The industry no longer exists.") end
   local construction = api.engine.getComponent(entity, api.type.ComponentType.CONSTRUCTION)
-  if not proposal.isSupported(construction) then return nil, nil, "该工厂不支持整理地块。" end
+  if not proposal.isSupported(construction) then return nil, nil, _("This industry does not support plot rearrangement.") end
   local owner = api.engine.getComponent(entity, api.type.ComponentType.PLAYER_OWNED)
   if owner and owner.player ~= api.engine.util.getPlayer() then
-    return nil, nil, "无法整理其他公司的工厂。"
+    return nil, nil, _("Cannot tidy another company's industry.")
   end
 
   local desc = api.res.constructionRep.get(api.res.constructionRep.find(construction.fileName))
@@ -108,11 +108,11 @@ function proposal.make(entity, mode)
   end, function(first, second)
     return isConnected(first, second, construction.transf)
   end)
-  if not fields then return nil, nil, reason end
+  if not fields then return nil, nil, _(reason) end
   params.xinTidyFieldLayout = fields
   params.xinTidyFieldSlots = availableSlots
   local candidate = api.engine.util.proposal.createProposalReplaceConstruction(entity, params)
-  if not candidate then return nil, nil, "无法生成地块整理方案。" end
+  if not candidate then return nil, nil, _("Could not prepare a plot layout.") end
 
   local context = api.type.Context.new()
   context.player = api.engine.util.getPlayer()

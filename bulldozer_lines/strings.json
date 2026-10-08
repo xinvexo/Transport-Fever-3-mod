@@ -1,0 +1,14 @@
+{
+  "en": {
+    "Lines while bulldozing": "Lines while bulldozing",
+    "Select displayed lines": "Select displayed lines",
+    "Show only visible lines": "Show only visible lines",
+    "No matching lines": "No matching lines"
+  },
+  "zh_CN": {
+    "Lines while bulldozing": "拆除时查看线路",
+    "Select displayed lines": "全选当前列表",
+    "Show only visible lines": "只显示可视范围内的线路",
+    "No matching lines": "没有匹配的线路"
+  }
+}

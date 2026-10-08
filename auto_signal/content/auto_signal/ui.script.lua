@@ -5,10 +5,10 @@ function data()
          return params.asEnabled == 2 and "Enabled" or "InputActionOnly"
       end,
       formatMinimumSpacing = function(scriptParams, meters)
-         return string.format(_("%d m"), meters)
+         return string.format(_("%.0f m"), meters)
       end,
       stepMinimumSpacing = function(scriptParams, meters, direction)
-         return math.max(50, math.min(2000, meters + direction * 50))
+         return math.max(1, math.min(2^53-1, meters + direction * 50))
       end,
    }
 end

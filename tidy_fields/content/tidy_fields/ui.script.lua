@@ -6,10 +6,10 @@ local ui = {}
 local PANEL_WIDTH = 360
 
 local directions = {
-  { value = "front", label = "前" },
-  { value = "back", label = "后" },
-  { value = "left", label = "左" },
-  { value = "right", label = "右" },
+  { value = "front", label = "Front" },
+  { value = "back", label = "Back" },
+  { value = "left", label = "Left" },
+  { value = "right", label = "Right" },
 }
 
 local function sizeStyle(width, height)
@@ -75,7 +75,7 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
       local ok, candidate, context, reason = pcall(proposals.make, entity, mode)
       if not ok then
         log.warning("[Tidy Fields] Could not prepare layout: " .. tostring(candidate))
-        status:set({ busy = false, message = "无法生成地块整理方案。" })
+        status:set({ busy = false, message = _("Could not prepare a plot layout.") })
         return
       end
       if not candidate then
@@ -83,7 +83,7 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
         return
       end
       api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(candidate, context, false, true), function(command, success)
-        local message = success and "地块已整理。" or proposals.describeFailure(command and command.resultProposalData)
+        local message = success and _("Plots tidied.") or proposals.describeFailure(command and command.resultProposalData)
         if not success then log.warning("[Tidy Fields] Build failed: " .. message) end
         if status:hasExpired() then return end
         status:set({ busy = false, message = message })
@@ -96,13 +96,13 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
         meta = {
           styleSheet = directionStyle(index),
           enabled = not status:old().busy,
-          tooltip = "点击选择或取消，可同时选择多个方向。",
+          tooltip = _("Click to select or deselect. Multiple directions can be selected."),
           tag = "industryWindow.tidyFields." .. direction.value,
         },
         value = selected:old()[direction.value] and 1 or 0,
         content = builtin.TextView{
           meta = { class = "font-scale-body" },
-          text = direction.label,
+          text = _(direction.label),
         },
         onValueChange = function(value)
           local nextSelection = {}
@@ -126,15 +126,15 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
           meta = { styleSheet = sizeStyle(PANEL_WIDTH, -1) },
           orientation = builtin.type.Orientation.Horizontal,
           children = {
-            builtin.TextView{ meta = { class = "font-scale-headline" }, text = "地块整理" },
+            builtin.TextView{ meta = { class = "font-scale-headline" }, text = _("Plot layout") },
             builtin.Component{ meta = { class = "horizontal-spacer" } },
-            builtin.TextView{ meta = { class = "font-scale-annotation" }, text = "方向可多选" },
+            builtin.TextView{ meta = { class = "font-scale-annotation" }, text = _("Choose directions") },
           },
         },
         spacer(8),
         builtin.BoxLayout{
           meta = {
-            tooltip = "前指门前横路对面，后指厂尾以外，都可向两侧展开；左右以从厂内面向大门向外看为准。门前横路留空。",
+            tooltip = _("Front is across the entrance road; back is beyond the rear. Both can extend sideways. Left and right are seen from inside looking out through the entrance. The entrance road stays clear."),
           },
           orientation = builtin.type.Orientation.Horizontal,
           children = controls,
@@ -145,12 +145,12 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
             class = "primary",
             styleSheet = actionStyle,
             enabled = not status:old().busy and layoutMode(selected:old()) ~= "",
-            tooltip = "至少选择一个方向，再整理地块；产业升级后可再次整理。",
+            tooltip = _("Select at least one direction, then tidy the plots. Tidy again after the industry expands."),
             tag = "industryWindow.tidyFields",
           },
           content = builtin.TextView{
             meta = { class = "font-scale-body" },
-            text = status:old().busy and "正在整理…" or "整理地块",
+            text = status:old().busy and _("Tidying…") or _("Tidy fields"),
           },
           onClick = onClick,
         },

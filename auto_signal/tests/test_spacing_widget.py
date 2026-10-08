@@ -68,7 +68,7 @@ class SpacingWidgetTests(unittest.TestCase):
         self.commits = []
         self.param = self.lua.table_from({
             "scriptParam": self.lua.table_from({
-                "name": "最小间距",
+                "name": "间距",
                 "formatValueFn": lambda value: f"{int(value)} 米",
             }),
             "currentValue": 300,
@@ -93,7 +93,7 @@ class SpacingWidgetTests(unittest.TestCase):
         row = self.render()
         slider = row.children[1]
         self.assertEqual((slider.min, slider.max, slider.step, slider.pageStep),
-                         (50, 2000, 1, 50))
+                         (50, 800, 1, 50))
         self.assertEqual(slider.value, 300)
         slider.onValueChange(375)
         row = self.render()
@@ -106,7 +106,8 @@ class SpacingWidgetTests(unittest.TestCase):
         spin = self.render().children[2]
         self.assertEqual(spin.kind, "DoubleSpinBox")
         self.assertTrue(spin.startInEditMode)
-        self.assertEqual((spin.min, spin.max, spin.step), (50, 2000, 1))
+        self.assertEqual((spin.min, spin.step), (1, 1))
+        self.assertGreater(spin.max, 2000)
         spin.onValueChange(375)
         row = self.render()
         self.assertEqual(row.children[1].value, 375)
@@ -135,19 +136,50 @@ class SpacingWidgetTests(unittest.TestCase):
         self.assertEqual(row.children[2].value, 425)
         self.assertEqual(self.commits, [])
 
-    def test_numeric_input_commits_whole_meters_within_the_range(self):
+    def test_numeric_input_accepts_positive_meters_outside_slider_range(self):
         self.render().children[2].onClick()
         spin = self.render().children[2]
         spin.onValueChange(375.6)
         spin.onValueChange(25)
         spin.onValueChange(2200)
-        self.assertEqual(self.commits, [376, 50, 2000])
+        spin.onValueChange(0)
+        self.assertEqual(self.commits, [376, 25, 2200, 1])
+
+    def test_typed_value_survives_edit_toggle_and_clamped_slider_display(self):
+        for value, thumb in ((25, 50), (1, 50), (1200, 800), (320, 320)):
+            with self.subTest(value=value):
+                self.render().children[2].onClick()
+                self.render().children[2].onValueChange(value)
+                row = self.render()
+                self.assertEqual(row.children[1].value, thumb)
+                self.assertEqual(row.children[2].value, value)
+                row.children[2].onStopEditMode()
+                row = self.render()
+                self.assertEqual(row.children[2].content.text, f"{value} 米")
+                self.assertEqual(self.param.currentValue, value)
+        self.assertEqual(self.commits, [25, 1, 1200, 320])
+
+    def test_nonfinite_input_is_ignored(self):
+        self.render().children[2].onClick()
+        spin = self.render().children[2]
+        spin.onValueChange(float("inf"))
+        spin.onValueChange(float("nan"))
+        self.assertEqual(self.commits, [])
+        self.assertEqual(self.param.currentValue, 300)
+
+    def test_exact_large_integer_input_is_not_rounded_up(self):
+        self.render().children[2].onClick()
+        spin = self.render().children[2]
+        for value in (2147483648, 4503599627370497, 2**53-1):
+            with self.subTest(value=value):
+                spin.onValueChange(value)
+                self.assertEqual(self.commits[-1], value)
 
     def test_native_label_wrapper_receives_layout_preferences(self):
         on_hover = lambda value: None
         self.param.onHover = on_hover
         wrapper = self.widget.build(self.param)
-        self.assertEqual(wrapper.name, "最小间距")
+        self.assertEqual(wrapper.name, "间距")
         self.assertTrue(wrapper.vertical)
         self.assertTrue(wrapper.addSpacer)
         self.assertIs(wrapper.onHover, on_hover)

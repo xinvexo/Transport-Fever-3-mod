@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -10,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class ProposalTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.translations = json.loads((ROOT / 'strings.json').read_text(encoding='utf-8'))
+        self.lua.globals()._ = self.translations['zh_CN'].__getitem__
         self.lua.execute("""
             function copy(value)
               if type(value) ~= 'table' then return value end
@@ -230,6 +233,20 @@ class ProposalTests(unittest.TestCase):
                 or math.abs(dry.pos[2] - field.pos[2]) >= (dry.size[2] + field.size[2]) / 2)
             end
         """)
+
+    def test_terrain_refusal_is_localized_without_submitting_a_proposal(self):
+        self.lua.execute('water = function() return true end')
+        for language, expected in (
+            ('en', 'Not enough connected land in the selected directions for the existing plots.'),
+            ('zh_CN', '所选方向没有足够与厂区相连的陆地容纳现有地块。'),
+        ):
+            with self.subTest(language=language):
+                self.lua.globals()._ = self.translations[language].__getitem__
+                candidate, context, reason = self.lua.globals().proposal.make(10, 'left')
+                self.assertIsNone(candidate)
+                self.assertIsNone(context)
+                self.assertEqual(reason, expected)
+                self.assertEqual(self.lua.eval('#nativeRequests'), 0)
 
     def test_describes_native_failure_details(self):
         for setup, expected in (

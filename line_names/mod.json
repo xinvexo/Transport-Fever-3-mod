@@ -1,0 +1,12 @@
+{
+  "modId": "xin_line_names_1",
+  "revision": 5,
+  "severityAdd": "None",
+  "severityRemove": "None",
+  "dependencies": [],
+  "incompatibilities": [],
+  "params": [],
+  "runScript": {
+    "fileName": "xin_line_names_1::/mod.script@runFn"
+  }
+}

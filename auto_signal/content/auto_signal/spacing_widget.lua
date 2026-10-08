@@ -13,15 +13,17 @@ local SpacingControl = react.RegisterRecipe("XinAutoSignalSpacingControl", funct
 
    local editing = react.useState(false)
    local commit = function(value)
-      param.onValueChange(math.max(50, math.min(2000, math.floor(value + 0.5))))
+      if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return end
+      local rounded = value == math.floor(value) and value or math.floor(value + 0.5)
+      param.onValueChange(math.max(1, math.min(2^53-1, rounded)))
    end
 
    local valueControl
    if editing:old() then
       valueControl = builtin.DoubleSpinBox{
          meta = { class = "font-scale-body", styleSheet = valueStyle },
-         min = 50,
-         max = 2000,
+         min = 1,
+         max = 2^53-1,
          step = 1,
          value = param.currentValue,
          onValueChange = commit,
@@ -51,10 +53,12 @@ local SpacingControl = react.RegisterRecipe("XinAutoSignalSpacingControl", funct
             meta = { styleSheet = sliderStyle },
             horizontal = true,
             min = 50,
-            max = 2000,
+            max = 800,
             step = 1,
             pageStep = 50,
-            value = param.currentValue,
+            -- Keep an out-of-slider-range typed value in the numeric control.
+            -- Rendering the clamped thumb must not commit it back to params.
+            value = math.max(50, math.min(800, param.currentValue)),
             onValueChange = commit,
             disableGamepadNavigation = param.disableGamepadNavigation,
          },

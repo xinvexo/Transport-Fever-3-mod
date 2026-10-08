@@ -1,12 +1,17 @@
 {
   "name": "Tidy Fields",
-  "summary": "Arrange industry plots and unlock their full growth potential.",
-  "description": "Arrange plots in compact rows in selected directions while keeping the entrance road clear. Supports crop, livestock, cotton and rubber farms and forests. Newly generated expandable industries receive the maximum growth cap allowed by their predefined plots; current plot counts, growth requirements and production rules remain native.",
+  "summary": "Arrange industry plots in selected directions and unlock full growth caps for new industries.",
+  "description": "Supports crop, livestock, cotton and rubber farms and forests. Open a supported industry's window, select one or more directions and click Tidy fields. Directions rotate with the industry; left and right are seen from inside looking out through the entrance. Front places plots across the entrance road, which stays clear. Run again after expansion or when changing direction.\n\nPlots form compact rows on land connected to the site. Current plot count, production, industry location and name are preserved. If existing plots do not fit or the game rejects construction, the original layout stays and a reason is shown. Lack of room for future plots may limit later expansion; free space and tidy again. Layouts are saved, so keep the mod enabled in saves with tidied industries. After removal, a later industry update restores the vanilla layout.\n\nEnable before generating a new map to give newly created vanilla expandable industries the growth cap of all their predefined plots. Growth still follows vanilla conditions and may be limited by terrain or obstacles. Existing industries' growth caps are not changed. This includes the functionality of the separate Industry Maximum Growth mod; do not enable both.",
   "localization": {
     "zh_CN": {
       "name": "工厂地块规整",
-      "summary": "规整工厂地块，让可扩建产业拥有完整的成长上限。",
-      "description": "支持作物、牲畜、棉花、橡胶农场和伐木场的地块整理。用前后左右多选按钮选择范围，优先补齐行列、连片排列，避让门前横路，可重复整理。已合并产业最大成长上限：新生成的14类原版可扩建产业，上限设为全部预设地块数量；当前规模、成长条件和原版生产规则保持不变。"
+      "summary": "按所选方向规整工厂地块，并开放新建产业的完整成长上限。",
+      "description": "支持作物、牲畜、棉花、橡胶农场和伐木场。打开支持的产业窗口，选择至少一个方向，点击“整理地块”，可多选。方向随工厂旋转，左右以从厂内面向大门为准；“前”把地块排到门前道路对面，道路留空。产业扩建或更换方向后可再次整理。\n\n地块沿与厂区相连的陆地紧凑排列，保留当前地块数量、生产能力、工厂位置和名称。放不下现有地块或施工被拒绝时保留原布局并显示原因；未来地块空间不足可能限制后续扩建，腾出空间后可再次整理。布局随存档保存，已整理的存档请保持启用；移除后，产业再次更新会恢复原版布局。\n\n创建新地图前启用，新生成的原版可扩建产业会使用全部预设地块作为成长上限。仍按原版条件逐步成长，地形和障碍物可能限制实际扩建，已有产业的上限不自动改写。已包含独立“产业最大成长上限”模组的功能，无需同时启用。"
+    },
+    "en": {
+      "name": "Tidy Fields",
+      "summary": "Arrange industry plots in selected directions and unlock full growth caps for new industries.",
+      "description": "Supports crop, livestock, cotton and rubber farms and forests. Open a supported industry's window, select one or more directions and click Tidy fields. Directions rotate with the industry; left and right are seen from inside looking out through the entrance. Front places plots across the entrance road, which stays clear. Run again after expansion or when changing direction.\n\nPlots form compact rows on land connected to the site. Current plot count, production, industry location and name are preserved. If existing plots do not fit or the game rejects construction, the original layout stays and a reason is shown. Lack of room for future plots may limit later expansion; free space and tidy again. Layouts are saved, so keep the mod enabled in saves with tidied industries. After removal, a later industry update restores the vanilla layout.\n\nEnable before generating a new map to give newly created vanilla expandable industries the growth cap of all their predefined plots. Growth still follows vanilla conditions and may be limited by terrain or obstacles. Existing industries' growth caps are not changed. This includes the functionality of the separate Industry Maximum Growth mod; do not enable both."
     }
   },
   "authors": [

@@ -1,0 +1,30 @@
+{
+  "en": {
+    "Towns and industries - line purpose": "Towns and industries - line purpose",
+    "Line naming: bus": "Bus",
+    "Line naming: intercity bus": "Intercity bus",
+    "Line naming: passenger": "Passenger",
+    "Line naming: tram": "Tram",
+    "Line naming: ferry": "Ferry",
+    "Line naming: flight": "Passenger flight",
+    "Line naming: workers": "Workers",
+    "Line naming: freight": "Freight",
+    "Line naming: mixed": "Passenger and freight",
+    "Line naming: delivery": " delivery",
+    "Line naming: line": "Line"
+  },
+  "zh_CN": {
+    "Towns and industries - line purpose": "城镇与产业·线路用途",
+    "Line naming: bus": "公交",
+    "Line naming: intercity bus": "城际客车",
+    "Line naming: passenger": "客运",
+    "Line naming: tram": "有轨电车",
+    "Line naming: ferry": "客船",
+    "Line naming: flight": "航空客运",
+    "Line naming: workers": "通勤",
+    "Line naming: freight": "货运",
+    "Line naming: mixed": "客货运输",
+    "Line naming: delivery": "配送",
+    "Line naming: line": "线路"
+  }
+}

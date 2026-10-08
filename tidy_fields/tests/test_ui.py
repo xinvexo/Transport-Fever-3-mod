@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import unittest
 
@@ -10,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class TidyFieldsUiTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.translations = json.loads((ROOT / 'strings.json').read_text(encoding='utf-8'))
+        self.lua.globals()._ = self.translations['zh_CN'].__getitem__
         self.lua.execute("""
             local builtin = {type = {Orientation = {Vertical = 'vertical', Horizontal = 'horizontal'}}}
             for _, name in ipairs({'BoxLayout', 'Button', 'TextView', 'ToggleButton', 'Component'}) do
@@ -110,6 +113,24 @@ class TidyFieldsUiTests(unittest.TestCase):
         for side in ("front", "back", "left", "right"):
             self.direction_button(side).onValueChange(1 if side in sides else 0)
             self.render()
+
+    def test_english_controls_and_async_results(self):
+        self.lua.globals()._ = self.translations['en'].__getitem__
+        self.render()
+        self.assertEqual(self.direction_button('front').content.text, 'Front')
+        self.assertEqual(self.direction_button('right').content.text, 'Right')
+        self.assertEqual(self.element('Button').content.text, 'Tidy fields')
+        self.element('Button').onClick()
+        self.render()
+        self.assertEqual(self.element('Button').content.text, 'Tidying…')
+        self.lua.execute('pendingCallback({}, true)')
+        self.render()
+        self.assertEqual(self.element('TextView', 'industryWindow.tidyFields.result').text, 'Plots tidied.')
+        self.element('Button').onClick()
+        self.lua.execute("pendingCallback({resultProposalData = {errorState = {messages = {'Blocked 50%'}}}}, false)")
+        self.render()
+        self.assertEqual(self.element('TextView', 'industryWindow.tidyFields.result').text,
+                         'Could not tidy: Blocked 50%')
 
     def test_direction_buttons_combine_choices_and_default_to_all(self):
         self.render()

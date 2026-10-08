@@ -1,0 +1,27 @@
+{
+  "name": "Interchange Collection",
+  "summary": "Six compact highway interchange types with two or three mainline lanes.",
+  "description": "Adds an Interchanges category under Roads, after Road Constructions. Includes cloverleaf, diamond, trumpet, directional T, turbine and four-level stack interchanges. Choose two or three lanes per mainline direction: 12 base combinations, with a fixed compact size and concrete bridges. Right-hand traffic only; available from 1940 alongside native highways.\n\nChoose a type and lane count, use the game's rotation and height controls, place the interchange and connect its endpoints. Cloverleaf and diamond have four numbered toggles matching the preview: disable individual loops or ramps. Cloverleaf right turns remain when a loop is disabled. Trumpet and directional T branches stay at two lanes. Diamond cross-road endpoints remain elevated; other external endpoints use the construction reference height. Placed roads can be edited with the normal road tools.\n\nUse relatively flat, open ground. Compact approaches are steep, and terrain or existing structures may prevent construction. Diamond ramps meet the cross road at grade; cloverleaf mainlines retain weaving. Shared cloverleaf arcs use a native two-way country road with one lane each way. Turns at nodes are controlled by the game. There are no dedicated U-turn ramps. Menu and cover images are illustrations; use the in-game placement preview to check the actual layout and lanes. Reload from the main menu after updating. Keep a separate save before removing the mod.",
+  "localization": {
+    "en": {
+      "name": "Interchange Collection",
+      "summary": "Six compact highway interchange types with two or three mainline lanes.",
+      "description": "Adds an Interchanges category under Roads, after Road Constructions. Includes cloverleaf, diamond, trumpet, directional T, turbine and four-level stack interchanges. Choose two or three lanes per mainline direction: 12 base combinations, with a fixed compact size and concrete bridges. Right-hand traffic only; available from 1940 alongside native highways.\n\nChoose a type and lane count, use the game's rotation and height controls, place the interchange and connect its endpoints. Cloverleaf and diamond have four numbered toggles matching the preview: disable individual loops or ramps. Cloverleaf right turns remain when a loop is disabled. Trumpet and directional T branches stay at two lanes. Diamond cross-road endpoints remain elevated; other external endpoints use the construction reference height. Placed roads can be edited with the normal road tools.\n\nUse relatively flat, open ground. Compact approaches are steep, and terrain or existing structures may prevent construction. Diamond ramps meet the cross road at grade; cloverleaf mainlines retain weaving. Shared cloverleaf arcs use a native two-way country road with one lane each way. Turns at nodes are controlled by the game. There are no dedicated U-turn ramps. Menu and cover images are illustrations; use the in-game placement preview to check the actual layout and lanes. Reload from the main menu after updating. Keep a separate save before removing the mod."
+    },
+    "zh_CN": {
+      "name": "常见立交桥合集",
+      "summary": "六类小型高速立交，主线可选单向两车道或三车道。",
+      "description": "在“道路 → 立交桥”独立分类中添加苜蓿叶、菱形、喇叭形、定向T形、涡轮形和四层全互通枢纽，分类位于官方“道路构造”之后。主线可选每向两车道或三车道，共12种基础组合；固定小尺寸和混凝土桥。适用于右侧通行，与原生高速公路一样从1940年开放。\n\n选择类型和车道数，用游戏原生旋转、升降操作放置，再连接各方向端点。苜蓿叶和菱形有对应预览图的1～4编号开关，可分别关闭叶片或匝道；关闭叶片后保留右转。喇叭形和定向T的支路固定两车道。菱形横向端点保持高架高度，其他外接端点位于建造基准高度。建成后可使用普通道路工具编辑。\n\n适合相对平整的空地，紧凑引道较陡，地形或既有设施可能导致施工被拒绝。菱形匝道与横向道路为平交连接，苜蓿叶主线仍有交织；共用弧段为原生双向乡村公路，每向一条车道。节点转向由游戏决定，不设专用掉头匝道。菜单与封面图片为示意，实际路型和车道请查看游戏放置预览。更新后请回主菜单重载存档，移除前另存备份。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Road Construction"
+  ],
+  "url": ""
+}

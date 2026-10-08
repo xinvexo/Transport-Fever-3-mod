@@ -15,8 +15,14 @@ BASE_RESOURCES = ("mod.json", "_metadata", "content")
 MOD_RESOURCES = {
     "auto_alternatives": (*BASE_RESOURCES, "strings.json"),
     "auto_signal": (*BASE_RESOURCES, "strings.json"),
+    "bulldozer_lines": (*BASE_RESOURCES, "strings.json"),
+    "chinese_map_names": (*BASE_RESOURCES, "strings.json"),
+    "clear_catchment": BASE_RESOURCES,
+    "interchange_pack": (*BASE_RESOURCES, "strings.json"),
+    "line_names": (*BASE_RESOURCES, "strings.json"),
+    "line_vehicle_colors": BASE_RESOURCES,
     "station_rows": BASE_RESOURCES,
-    "tidy_fields": BASE_RESOURCES,
+    "tidy_fields": (*BASE_RESOURCES, "strings.json"),
 }
 
 

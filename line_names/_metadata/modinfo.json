@@ -1,0 +1,27 @@
+{
+  "name": "Readable Line Names",
+  "summary": "Name lines by towns, industries and transport purpose.",
+  "description": "Adds Towns and industries - line purpose to the existing automatic line rename dialog. Distinguishes local and intercity passenger lines, industry freight and worker services. Names use the towns, industries and stop order in your save; functional terms follow the game language.\n\nEnable the mod, select lines in the line manager, open automatic renaming, preview the new scheme and apply. Local bus and freight services use numbers; intercity passenger services are numbered only when names would otherwise match. Existing suitable numbers are reused and may have gaps. Vehicle count does not determine line numbering. Vanilla road, tram, train and ship depot default names also use a hyphen between town and depot type; custom depot names are preserved.\n\nApplying the scheme renames all selected lines, including custom-named lines; it does not keep renaming in the background. Apply again after changing routes or loading settings. Industry matching uses station catchment. Ambiguous destinations retain their station names, and unclear cargo uses a general freight label. Place the supplier first for freight services. Disabling the mod keeps applied line names but restores the vanilla default depot-name format.\n\nCover art illustrates the function; actual appearance is determined by the game.",
+  "localization": {
+    "en": {
+      "name": "Readable Line Names",
+      "summary": "Name lines by towns, industries and transport purpose.",
+      "description": "Adds Towns and industries - line purpose to the existing automatic line rename dialog. Distinguishes local and intercity passenger lines, industry freight and worker services. Names use the towns, industries and stop order in your save; functional terms follow the game language.\n\nEnable the mod, select lines in the line manager, open automatic renaming, preview the new scheme and apply. Local bus and freight services use numbers; intercity passenger services are numbered only when names would otherwise match. Existing suitable numbers are reused and may have gaps. Vehicle count does not determine line numbering. Vanilla road, tram, train and ship depot default names also use a hyphen between town and depot type; custom depot names are preserved.\n\nApplying the scheme renames all selected lines, including custom-named lines; it does not keep renaming in the background. Apply again after changing routes or loading settings. Industry matching uses station catchment. Ambiguous destinations retain their station names, and unclear cargo uses a general freight label. Place the supplier first for freight services. Disabling the mod keeps applied line names but restores the vanilla default depot-name format.\n\nCover art illustrates the function; actual appearance is determined by the game."
+    },
+    "zh_CN": {
+      "name": "线路智能命名",
+      "summary": "根据城镇、产业和运输用途命名，区分同城与跨城线路。",
+      "description": "在原版“自动重命名线路”中增加“城镇与产业·线路用途”方案，区分同城与跨城客运、工厂间货运和城镇至工厂的通勤客运。地名、产业名和停靠顺序沿用存档，功能文字随游戏语言变化。\n\n启用后，在线路管理器选中线路，打开自动重命名，预览新方案并应用。同城公交和货运使用编号；跨城客运仅同名时编号区分。已有合适编号优先保留，不保证连续；配车数量不决定线路编号。原版道路、有轨电车、列车车库和船坞的默认名称也用短横线分隔城市与设施类型，自定义车库名保留。\n\n应用会改名本次选中的所有线路，包括选中的自定义名称，不会在后台持续改名。调整线路或装载设置后可再次使用。产业识别依据车站覆盖范围，目的地无法区分时保留站名，货种不明时使用概括的“货运”。货运请把供货站放在前面。停用后保留已应用的线路名，车库恢复原版默认名称格式。\n\n封面为功能示意，实际画面以游戏内为准。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

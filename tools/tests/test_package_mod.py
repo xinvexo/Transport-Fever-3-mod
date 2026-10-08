@@ -146,6 +146,8 @@ class PackageTests(unittest.TestCase):
             with self.subTest(mod=name):
                 files = list(ModPackage(ROOT / name, resources).resource_files())
                 self.assertTrue(files)
+                if (ROOT / name / 'strings.json').exists():
+                    self.assertIn(ROOT / name / 'strings.json', files)
                 result = subprocess.run(
                     [sys.executable, "-B", "-X", "utf8", str(ROOT / name / "tools/package_mod.py"), "--help"],
                     cwd=self.directory, capture_output=True, text=True, encoding="utf-8",

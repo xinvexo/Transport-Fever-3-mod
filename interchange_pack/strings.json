@@ -1,0 +1,42 @@
+{
+  "en": {
+    "Cloverleaf interchange": "Cloverleaf interchange",
+    "All four loops are enabled by default. Shared arcs use one native two-way road with one lane each way, connected to one-way ramps. Right turns remain when a loop is disabled.": "All four loops are enabled by default. Shared arcs use one native two-way road with one lane each way, connected to one-way ramps. Right turns remain when a loop is disabled.",
+    "Diamond interchange": "Diamond interchange",
+    "Connects an east-west highway to a north-south two-way road. Each of the four ramps can be disabled. Cross-road endpoints remain elevated.": "Connects an east-west highway to a north-south two-way road. Each of the four ramps can be disabled. Cross-road endpoints remain elevated.",
+    "Trumpet interchange": "Trumpet interchange",
+    "Connects an east-west highway to a two-lane branch on the south, with one loop ramp. Use the game's rotation controls to change the branch direction.": "Connects an east-west highway to a two-lane branch on the south, with one loop ramp. Use the game's rotation controls to change the branch direction.",
+    "Directional T interchange": "Directional T interchange",
+    "Connects an east-west mainline to a southern branch. Every turn has a separate ramp; the two left turns cross at different levels.": "Connects an east-west mainline to a southern branch. Every turn has a separate ramp; the two left turns cross at different levels.",
+    "Turbine interchange": "Turbine interchange",
+    "A full four-way interchange with four left-turn ramps sweeping around the center. Its larger footprint suits highway junctions.": "A full four-way interchange with four left-turn ramps sweeping around the center. Its larger footprint suits highway junctions.",
+    "Four-level stack interchange": "Four-level stack interchange",
+    "Two mainline levels and two left-turn ramp levels provide all twelve through and turning movements.": "Two mainline levels and two left-turn ramp levels provide all twelve through and turning movements.",
+    "Off": "Off",
+    "Keep": "Keep",
+    "Lanes": "Lanes",
+    "Interchanges": "Interchanges",
+    "Three-lane one-way street": "Three-lane one-way street",
+    "Shared interchange arc lane": "Shared interchange arc lane"
+  },
+  "zh_CN": {
+    "Cloverleaf interchange": "苜蓿叶立交",
+    "All four loops are enabled by default. Shared arcs use one native two-way road with one lane each way, connected to one-way ramps. Right turns remain when a loop is disabled.": "四叶默认全开。共用弧段使用一条原生双向道路，每向一条车道，两端连接单向匝道；关闭叶片后仍保留右转。",
+    "Diamond interchange": "菱形立交",
+    "Connects an east-west highway to a north-south two-way road. Each of the four ramps can be disabled. Cross-road endpoints remain elevated.": "东西高速主路与南北双向道路相接，四条匝道可独立关闭。横向道路保留高架接头。",
+    "Trumpet interchange": "喇叭形立交",
+    "Connects an east-west highway to a two-lane branch on the south, with one loop ramp. Use the game's rotation controls to change the branch direction.": "东西高速主路与南侧两车道支路相接，含一条环形匝道。使用游戏原生旋转操作调整支路朝向。",
+    "Directional T interchange": "定向 T 形立交",
+    "Connects an east-west mainline to a southern branch. Every turn has a separate ramp; the two left turns cross at different levels.": "东西主路与南侧支路相接；所有转向使用独立匝道，两条左转分层跨越。",
+    "Turbine interchange": "涡轮形／旋涡立交",
+    "A full four-way interchange with four left-turn ramps sweeping around the center. Its larger footprint suits highway junctions.": "四路全互通，四条左转匝道向外展开并绕中心旋转。占地较大，适合高速公路枢纽。",
+    "Four-level stack interchange": "四层全互通枢纽",
+    "Two mainline levels and two left-turn ramp levels provide all twelve through and turning movements.": "两层直行主线与两层左转匝道，包含全部十二个直行和转向连接。",
+    "Off": "关闭",
+    "Keep": "保留",
+    "Lanes": "车道",
+    "Interchanges": "立交桥",
+    "Three-lane one-way street": "三车道单行街道",
+    "Shared interchange arc lane": "立交共用弧段单行车道"
+  }
+}

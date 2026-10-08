@@ -1,0 +1,28 @@
+{
+  "name": "Chinese Names for Preset Maps",
+  "summary": "Use Chinese names for existing and future towns, people and facilities on preset maps.",
+  "description": "Enable before starting a new game from a preset map, including Deluxe maps. Use the Simplified Chinese game interface and let the simulation run briefly after loading. Existing names are replaced and future objects continue using Chinese names. Restart the game after updating the mod.\n\nCovers towns, streets, residents, industries, stations including ports and airports, depots, maintenance buildings, warehouses, headquarters and supported standalone buildings. Default numbered line and vehicle names are also localized. Towns and streets use the game's China name lists; these are replacement Chinese names, not transliterations of the original place names. Terrain and object positions remain unchanged.\n\nPlayer nicknames, company names and custom line/vehicle names are preserved. The map-selection title is unchanged. Intended for new games: adding it midway does not bulk-rename existing objects, but does change future name generation. Incomplete initial tasks resume when the save is loaded; older saves previously using this mod can receive a one-time pass for missed industry names. Completed tasks stop scanning. Keep the mod enabled when continuing the save. Requires the Simplified Chinese interface for facility suffixes; does not operate in the map editor.\n\nCover art illustrates the function; actual appearance is determined by the game.",
+  "localization": {
+    "zh_CN": {
+      "name": "预设地图中文名称",
+      "summary": "将预设地图已有名称改为中文，后续继续生成中文名称。",
+      "description": "从豪华版等预设地图创建新游戏前启用，使用简体中文游戏界面，进入地图后让游戏运行片刻。已有名称会更换为中文，后续新增对象继续生成中文名称。更新模组后请重启游戏。\n\n覆盖城市、街道、人物、产业、车站（含港口和机场）、车库、维护楼、仓库、总部和支持的独立建筑，也会转换原版编号线路与车辆名称。城市和街道使用游戏自带的中国名称库，是更换为中国地名，而非原地名的中文音译；不改变地形及对象位置。\n\n保留玩家昵称、公司名和非默认的自定义线路、车辆名称，不修改地图选择菜单的标题。适用于新开局，中途加入不会批量改已有对象，但会改变后续名称生成方式。未完成的开局任务可随读档继续；曾使用本模组的旧存档可一次性补齐遗漏的外文产业名。完成后停止扫描。继续存档时请保持模组启用；设施后缀依赖简体中文界面。在地图编辑器中不生效。\n\n封面为功能示意，实际画面以游戏内为准。"
+    },
+    "en": {
+      "name": "Chinese Names for Preset Maps",
+      "summary": "Use Chinese names for existing and future towns, people and facilities on preset maps.",
+      "description": "Enable before starting a new game from a preset map, including Deluxe maps. Use the Simplified Chinese game interface and let the simulation run briefly after loading. Existing names are replaced and future objects continue using Chinese names. Restart the game after updating the mod.\n\nCovers towns, streets, residents, industries, stations including ports and airports, depots, maintenance buildings, warehouses, headquarters and supported standalone buildings. Default numbered line and vehicle names are also localized. Towns and streets use the game's China name lists; these are replacement Chinese names, not transliterations of the original place names. Terrain and object positions remain unchanged.\n\nPlayer nicknames, company names and custom line/vehicle names are preserved. The map-selection title is unchanged. Intended for new games: adding it midway does not bulk-rename existing objects, but does change future name generation. Incomplete initial tasks resume when the save is loaded; older saves previously using this mod can receive a one-time pass for missed industry names. Completed tasks stop scanning. Keep the mod enabled when continuing the save. Requires the Simplified Chinese interface for facility suffixes; does not operate in the map editor.\n\nCover art illustrates the function; actual appearance is determined by the game."
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod",
+    "Localization"
+  ],
+  "url": ""
+}

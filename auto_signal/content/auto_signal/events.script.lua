@@ -52,11 +52,11 @@ local function collectJobs(event, current)
               local data = component(entity, "EDGE_OBJECT")
               local params = data and data.params or {}
               if params.asEnabled == 2 then
-                local minimum = tonumber(params.asMinimumSpacing)
-                if minimum and minimum >= 50 and minimum <= 2000 then
+                local gap = tonumber(params.asMinimumSpacing)
+                if gap and gap >= 1 and gap <= 2^53-1 and gap == math.floor(gap) then
                   current.nextId = current.nextId + 1
                   current.jobs[#current.jobs + 1] = {
-                    id = current.nextId, signal = entity, minimum = minimum,
+                    id = current.nextId, signal = entity, spacing = gap,
                   }
                 end
               end
@@ -69,74 +69,24 @@ local function collectJobs(event, current)
   while #current.jobs > 20 do table.remove(current.jobs, 1) end
 end
 
-local function sameArray(first, second, tolerance)
-  if #first ~= #second then return false end
-  for index, value in ipairs(first) do
-    if math.abs(value - second[index]) > tolerance then return false end
-  end
-  return true
-end
-
-local function recoveryLayouts(count)
-  if count == 1 then
-    return { { phase = 0.25 }, { phase = 0.75 }, { phase = 0 }, { phase = 1 } }
-  end
-  return {
-    { spread = 0, phase = 0.5, maximumCount = count },
-    { spread = 0.5, phase = 0.5, maximumCount = count },
-    { spread = 0, phase = 0.25, maximumCount = count },
-    { spread = 0, phase = 0.75, maximumCount = count },
-    { spread = 0, phase = 0, maximumCount = count },
-    { spread = 0, phase = 1, maximumCount = count },
-    { spread = 1, phase = 0.5, maximumCount = count - 1 },
-    { spread = 0, phase = 0.5, maximumCount = count - 1 },
-  }
-end
-
--- A rejected build leaves the old signals intact. Try another complete layout
--- on the next GUI update, retaining the requested minimum distance throughout.
-local function startAttempt(request)
+-- Submit one exact layout. A rejection leaves the original signals intact;
+-- never retry with a different spacing, position, phase or number of lights.
+local function startBuild(job)
   local ok, submitted, reason = pcall(function()
-    while request.nextLayout <= #request.layouts do
-      local index = request.nextLayout
-      request.nextLayout = index + 1
-      local plan, planError = network.plan(request.job.signal, request.job.minimum, request.layouts[index])
-      if not plan then return false, planError end
-      if request.sourceEdges and not sameArray(request.sourceEdges, plan.sourceEdges, 0) then
-        return false, "track section changed during placement"
-      end
-      if not request.sourceEdges then
-        request.sourceEdges = plan.sourceEdges
-        for _, layout in ipairs(recoveryLayouts(plan.count)) do
-          request.layouts[#request.layouts + 1] = layout
-        end
-      end
-      local repeated = false
-      for _, positions in ipairs(request.tried) do
-        if sameArray(positions, plan.positions, 0.000001) then repeated = true; break end
-      end
-      if not repeated then
-        request.tried[#request.tried + 1] = plan.positions
-        local proposal, proposalError = network.proposal(plan)
-        if not proposal then return false, proposalError end
-        local context = api.type.Context.new()
-        context.player = api.engine.util.getPlayer()
-        local completion = { complete = false, request = request }
-        pendingBuild = completion
-        api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(proposal, context, false, false),
-          function(command, success)
-            -- Game state helpers are used only during guiUpdate.
-            completion.complete = true
-            if not success then
-              local result = command and command.resultProposalData
-              completion.retryable = result and result.errorState and result.errorState.critical == true
-              completion.error = buildFailure(command)
-            end
-          end)
-        return true
-      end
-    end
-    return false, "no accepted layout after " .. tostring(#request.tried) .. " attempts"
+    local plan, planError = network.plan(job.signal, job.spacing)
+    if not plan then return false, planError end
+    local proposal, proposalError = network.proposal(plan)
+    if not proposal then return false, proposalError end
+    local context = api.type.Context.new()
+    context.player = api.engine.util.getPlayer()
+    local completion = { complete = false }
+    pendingBuild = completion
+    api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(proposal, context, false, false),
+      function(command, success)
+        completion.complete = true
+        if not success then completion.error = buildFailure(command) end
+      end)
+    return true
   end)
   if not ok then pendingBuild = nil; return false, submitted end
   return submitted, reason
@@ -174,15 +124,7 @@ function data()
       if pendingBuild then
         local completed = pendingBuild
         pendingBuild = nil
-        if completed.error then
-          if completed.retryable then
-            local submitted, reason = startAttempt(completed.request)
-            if submitted then return end
-            warn(completed.error .. "; " .. tostring(reason))
-          else
-            warn(completed.error)
-          end
-        end
+        if completed.error then warn(completed.error) end
       end
       if ui.done >= current.nextId then return end
       for _, job in ipairs(current.jobs) do
@@ -190,9 +132,7 @@ function data()
           ui.done = job.id
           guiState:set(ui)
           if component(job.signal, "EDGE_OBJECT") then
-            local submitted, reason = startAttempt({
-              job = job, layouts = { {} }, nextLayout = 1, tried = {},
-            })
+            local submitted, reason = startBuild(job)
             if submitted then return end
             warn(reason)
           end

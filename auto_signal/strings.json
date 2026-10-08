@@ -3,18 +3,18 @@
     "Auto placement": "Auto placement",
     "Off": "Off",
     "On": "On",
-    "Minimum spacing": "Minimum spacing",
-    "%d m": "%d m",
+    "Signal spacing": "Signal spacing",
+    "%.0f m": "%.0f m",
     "Rearrange same-direction signals.": "Rearrange same-direction signals.",
-    "Spacing will not be shorter.": "Spacing will not be shorter."
+    "Place signals at this exact interval.": "Place signals at this exact interval."
   },
   "zh_CN": {
     "Auto placement": "自动布置",
     "Off": "关",
     "On": "开",
-    "Minimum spacing": "最小间距",
-    "%d m": "%d 米",
+    "Signal spacing": "间距",
+    "%.0f m": "%.0f 米",
     "Rearrange same-direction signals.": "自动重排整段同向信号灯。",
-    "Spacing will not be shorter.": "实际间距不小于此值。"
+    "Place signals at this exact interval.": "从前方交点之前开始，按此间距向后布置信号灯。"
   }
 }

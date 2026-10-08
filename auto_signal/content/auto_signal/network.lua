@@ -1,9 +1,9 @@
 local spacing = ug_require "xin_auto_signal_1::/auto_signal/spacing.lua"
+local geometry = ug_require "xin_auto_signal_1::/auto_signal/geometry.lua"
 local network = {}
 local MAX_EDGES = 5000
 local MAX_SIGNALS = 1000
-local JOINT_CLEARANCE = 0.5
-local BOUNDARY_CLEARANCE = 10
+local END_CLEARANCE = 1
 
 local function component(entity, kind)
   return api.engine.getComponent(entity, api.type.ComponentType[kind])
@@ -31,6 +31,8 @@ local function edgeLength(entity, cache)
   return length
 end
 
+-- Return direction relative to BaseEdge.node0 -> node1, not the potentially
+-- reversed direction of a transport-network subedge hosting the signal.
 function network.signalDirection(edge, signal, cache)
   local transport = edgeTransport(edge, cache)
   local queries
@@ -49,10 +51,25 @@ function network.signalDirection(edge, signal, cache)
         if queries then queries[key] = found end
       end
       if found and found.entity == signal then
+        local opposite
+        if cache then
+          cache.orientations[edge] = cache.orientations[edge] or {}
+          opposite = cache.orientations[edge][index]
+        end
+        if opposite == nil then
+          local base = assert(component(edge, "BASE_EDGE"), "signal track no longer exists")
+          local curveData
+          opposite, curveData = geometry.transportOpposite(base, transport.edges[index].geometry,
+            cache and cache.geometry[edge])
+          if cache then
+            cache.orientations[edge][index] = opposite
+            cache.geometry[edge] = curveData
+          end
+        end
         local list = component(signal, "SIGNAL_LIST")
         local data = list and list.signals[found.index + 1]
         local oneWay = data and data.type == api.type.Signal.Type.ONE_WAY_SIGNAL or false
-        return reversed, oneWay, data and data.type
+        return reversed ~= opposite, oneWay, data and data.type
       end
     end
   end
@@ -79,47 +96,13 @@ local function endNode(segment)
   return segment.forward and segment.base.node1 or segment.base.node0
 end
 
-local function tangentKey(segment, reverse)
-  local forward = segment.forward ~= reverse
-  local first = forward and segment.base.tangent0 or segment.base.tangent1
-  local last = forward and segment.base.tangent1 or segment.base.tangent0
-  local sign = forward and 1 or -1
-  return { sign * first.x, sign * first.y, sign * first.z,
-    sign * last.x, sign * last.y, sign * last.z }
-end
-
-local function keyLess(first, second)
-  for index = 1, #first do
-    if first[index] ~= second[index] then return first[index] < second[index] end
-  end
-  return false
-end
-
 -- A stable node, rather than the clicked position or mutable edge ids, anchors
 -- the section. Rebuilding its signals therefore produces the same layout.
 local function canonicalize(segments, closed)
-  if not closed then
-    if startNode(segments[1]) > endNode(segments[#segments]) then
-      return reverseSegments(segments)
-    end
-    return segments
+  if not closed and startNode(segments[1]) > endNode(segments[#segments]) then
+    return reverseSegments(segments)
   end
-  local first = 1
-  for index = 2, #segments do
-    if startNode(segments[index]) < startNode(segments[first]) then first = index end
-  end
-  local rotated = {}
-  for index = 1, #segments do
-    rotated[index] = segments[(first + index - 2) % #segments + 1]
-  end
-  local nextNode, previousNode = endNode(rotated[1]), startNode(rotated[#rotated])
-  -- A two-arc loop shares both end nodes. Its tangents distinguish the two
-  -- directions without depending on edge ids that change during rebuilding.
-  if nextNode > previousNode or (nextNode == previousNode
-    and keyLess(tangentKey(rotated[#rotated], true), tangentKey(rotated[1], false))) then
-    return reverseSegments(rotated)
-  end
-  return rotated
+  return segments
 end
 
 function network.corridor(seedEdge)
@@ -164,17 +147,43 @@ function network.corridor(seedEdge)
   return canonicalize(segments, closed), closed
 end
 
-function network.plan(signal, minimum, layout)
+-- Native town_util measures a road by summing its actual lane widths. Project
+-- that half-width onto the rail at the common node, then leave one metre clear.
+-- Shared nodes identify level crossings; a road on a bridge is not connected.
+local function roadClearance(edge, node, railTangent)
+  local road = assert(component(edge, "BASE_EDGE"), "crossing road no longer exists")
+  local width = 0
+  if road.laneConfigs_native then
+    for index = 1, road.laneConfigs_native:size() do
+      width = width + road.laneConfigs_native:at(index).width
+    end
+  else
+    for _, lane in ipairs(road.laneConfigs or {}) do width = width + lane.width end
+  end
+  assert(width > 0, "crossing road width unavailable")
+  local tangent
+  if road.node0 == node then tangent = road.tangent0
+  elseif road.node1 == node then tangent = road.tangent1 end
+  assert(tangent and railTangent, "crossing tangent unavailable")
+  local denominator = math.sqrt((tangent.x^2+tangent.y^2)*(railTangent.x^2+railTangent.y^2))
+  assert(denominator > 0, "crossing tangent has zero length")
+  local sine = math.abs(tangent.x*railTangent.y-tangent.y*railTangent.x)/denominator
+  assert(sine > 1e-6, "crossing angle unavailable")
+  return math.ceil(width/2/sine) + END_CLEARANCE
+end
+
+function network.plan(signal, gap)
   local seedObject = component(signal, "EDGE_OBJECT")
   if not seedObject then return nil, "signal no longer exists" end
   local host = api.engine.system.streetSystem.getEdgeForEdgeObject(signal)
   if not host or host < 0 then return nil, "signal has no track" end
-  local cache = { transport = {}, signals = {} }
+  local cache = { transport = {}, signals = {}, orientations = {}, geometry = {} }
   local seedDirection, oneWay, signalType = network.signalDirection(host, signal, cache)
   if seedDirection == nil then return nil, "signal direction unavailable" end
   if signalType == api.type.Signal.Type.WAYPOINT then return nil, "not a signal" end
   local segments, closed = network.corridor(host)
   if not segments then return nil, closed end
+  if closed then return nil, "closed track has no forward endpoint; original signals kept" end
 
   local direction, total = seedDirection, 0
   for _, segment in ipairs(segments) do
@@ -183,48 +192,53 @@ function network.plan(signal, minimum, layout)
     if segment.length <= 0 then return nil, "track length unavailable" end
     total = total + segment.length
   end
+  geometry.prepare(segments, cache.geometry)
 
   local resourceId = api.res.constructionRep.find(seedObject.edgeObjectConstruction)
   local construction = resourceId >= 0 and api.res.constructionRep.get(resourceId) or nil
   local clearance = construction and construction.edgeObject and construction.edgeObject.minDistToCrossing or 0
   local excluded, visitedNodes = {}, {}
-  local function checkCrossing(node, distance)
-    if clearance <= 0 then return end
-    if visitedNodes[node] then return end
-    visitedNodes[node] = true
-    local streets = api.engine.system.streetSystem.getNodeStreetSegments(node) or {}
-    local tracks = api.engine.system.streetSystem.getNodeTrackSegments(node) or {}
-    if #streets == 0 and #tracks <= 2 then return end
-    excluded[#excluded + 1] = { distance - clearance, distance + clearance }
-    if closed then
-      excluded[#excluded + 1] = { distance - clearance - total, distance + clearance - total }
-      excluded[#excluded + 1] = { distance - clearance + total, distance + clearance + total }
+  local function checkCrossing(node, distance, railTangent)
+    local data = visitedNodes[node]
+    if not data then
+      data = {
+        streets = api.engine.system.streetSystem.getNodeStreetSegments(node) or {},
+        tracks = api.engine.system.streetSystem.getNodeTrackSegments(node) or {},
+      }
+      visitedNodes[node] = data
+    end
+    if #data.streets == 0 and #data.tracks <= 2 then return end
+    local required = clearance
+    for _, road in ipairs(data.streets) do
+      required = math.max(required, roadClearance(road, node, railTangent))
+    end
+    if required <= 0 then return end
+    if data.range then
+      data.range[1] = math.min(data.range[1], distance-required)
+      data.range[2] = math.max(data.range[2], distance+required)
+    else
+      data.range = {distance-required, distance+required}
+      excluded[#excluded+1] = data.range
     end
   end
-  for _, segment in ipairs(segments) do checkCrossing(startNode(segment), segment.offset) end
-  checkCrossing(endNode(segments[#segments]), total)
-
-  local margin = math.min(BOUNDARY_CLEARANCE, total * 0.1)
-  local maximumCount = math.min(MAX_SIGNALS, layout and layout.maximumCount or MAX_SIGNALS)
-  if closed then
-    maximumCount = math.max(1, math.min(maximumCount, math.floor(total / minimum)))
-    margin = maximumCount > 1 and total / maximumCount / 2 or 0
-  end
-  local intervals = {}
   for _, segment in ipairs(segments) do
-    local first = math.max(margin, segment.offset + JOINT_CLEARANCE)
-    local last = math.min(total - margin, segment.offset + segment.length - JOINT_CLEARANCE)
-    if first <= last then intervals[#intervals + 1] = { first, last } end
+    checkCrossing(startNode(segment), segment.offset,
+      segment.forward and segment.base.tangent0 or segment.base.tangent1)
+    checkCrossing(endNode(segment), segment.offset+segment.length,
+      segment.forward and segment.base.tangent1 or segment.base.tangent0)
   end
-  intervals = spacing.exclude(intervals, excluded)
-  local positions = spacing.plan(intervals, minimum, maximumCount, layout)
-  if #positions == 0 then return nil, "no room for signals" end
+
+  -- Ordinary degree-two edge joints do not interrupt the distance grid. Only
+  -- the section's actual endpoints need the small construction setback.
+  local positions, reason = spacing.plan(total, gap, direction, END_CLEARANCE, MAX_SIGNALS, excluded)
+  if not positions then return nil, reason end
 
   local steps, positionIndex = {}, 1
   for _, segment in ipairs(segments) do
     local reversed = direction
     if not segment.forward then reversed = not reversed end
-    local step = { edge = segment.entity, positions = {}, remove = {}, left = not reversed }
+    -- Native campaign signal checks use left = not forward = baseReversed.
+    local step = { edge = segment.entity, positions = {}, remove = {}, left = reversed }
     for _, object in ipairs(segment.base.objects or {}) do
       if object[2] == api.type.enum.EdgeObjectType.SIGNAL then
         local existingDirection, _, existingType = network.signalDirection(segment.entity, object[1], cache)
@@ -237,7 +251,8 @@ function network.plan(signal, minimum, layout)
       local distance = positions[positionIndex] - segment.offset
       if distance > segment.length then break end
       local fraction = distance / segment.length
-      step.positions[#step.positions + 1] = segment.forward and fraction or 1 - fraction
+      if not segment.forward then fraction = 1 - fraction end
+      step.positions[#step.positions + 1] = geometry.parameterAt(segment, fraction)
       positionIndex = positionIndex + 1
     end
     if #step.positions > 0 or #step.remove > 0 then steps[#steps + 1] = step end

@@ -1,0 +1,27 @@
+{
+  "name": "Line Vehicle Colors",
+  "summary": "Automatically match vehicle paint to its line color.",
+  "description": "Enable the mod in your save to apply each line's existing color to its assigned vehicles. Works with current-player bus, truck, tram, train, ship, plane and helicopter lines, including paintable locomotives and carriages. Empty vehicles also follow their line color.\n\nExisting vehicles are matched once when enabled. After successful purchases, assignments or replacements in the native UI, only the affected vehicles are synchronized. Changing a line color synchronizes that line. Larger changes are processed in batches. Both system-assigned and manually selected line colors are respected. Only the areas a model allows to be painted change; fixed liveries and markings may affect the result.\n\nVehicle names are unchanged. There is no recurring fleet scan. Individual vehicle paint stays until another assignment, replacement or line-color change. Background changes made by other mods may not trigger synchronization. Unassigned vehicles and models without paint support stay unchanged. Disabling the mod keeps the last applied colors. Avoid other mods that automatically recolor vehicles.\n\nCover art illustrates the function; actual appearance is determined by the game.",
+  "localization": {
+    "en": {
+      "name": "Line Vehicle Colors",
+      "summary": "Automatically match vehicle paint to its line color.",
+      "description": "Enable the mod in your save to apply each line's existing color to its assigned vehicles. Works with current-player bus, truck, tram, train, ship, plane and helicopter lines, including paintable locomotives and carriages. Empty vehicles also follow their line color.\n\nExisting vehicles are matched once when enabled. After successful purchases, assignments or replacements in the native UI, only the affected vehicles are synchronized. Changing a line color synchronizes that line. Larger changes are processed in batches. Both system-assigned and manually selected line colors are respected. Only the areas a model allows to be painted change; fixed liveries and markings may affect the result.\n\nVehicle names are unchanged. There is no recurring fleet scan. Individual vehicle paint stays until another assignment, replacement or line-color change. Background changes made by other mods may not trigger synchronization. Unassigned vehicles and models without paint support stay unchanged. Disabling the mod keeps the last applied colors. Avoid other mods that automatically recolor vehicles.\n\nCover art illustrates the function; actual appearance is determined by the game."
+    },
+    "zh_CN": {
+      "name": "车辆跟随线路颜色",
+      "summary": "保留每条线路的配色，自动让所属车辆使用相同颜色。",
+      "description": "在存档中启用后，将当前玩家各条线路的颜色同步给所属车辆。支持公交、货车、有轨电车、火车、轮船、飞机和直升机，包括可涂色的车头和车厢；空车也跟随线路颜色。\n\n首次启用时补同步已有车辆。在原版界面购车、派车或替换成功后，只同步相关车辆；修改线路颜色时同步该线路。车辆较多时逐批处理。沿用系统分配或手动设置的线路颜色，只改变车型允许涂色的部分，固定涂装和原有图案可能影响观感。\n\n车辆名称保持原样，平时不反复扫描全车队，手工车辆配色会保留到该车下次换线、替换或所属线路改色。其他模组在后台直接修改车辆或线路时，不保证触发同步。未分配线路的车辆和不支持涂色的车型保持原样。停用后保留最后同步的颜色。避免同时启用其他自动修改车辆颜色的模组。\n\n封面为功能示意，实际画面以游戏内为准。"
+    }
+  },
+  "authors": [
+    {
+      "name": "Xin",
+      "role": "CREATOR"
+    }
+  ],
+  "tags": [
+    "Script Mod"
+  ],
+  "url": ""
+}

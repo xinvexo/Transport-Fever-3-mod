@@ -48,12 +48,9 @@ class EventTests(unittest.TestCase):
             },
           }
           networkFake = {
-              plan = function(entity, minimum, layout)
-                local phase = layout and layout.phase or 0.5
-                return {
-                entity = entity, minimum = minimum, count = 1,
-                sourceEdges = {10}, positions = {phase * 1000},
-              } end,
+              plan = function(entity, gap)
+                return { entity = entity, spacing = gap, count = 1, positions = {999.5} }
+              end,
               proposal = function(plan) return plan end,
           }
           function ug_require()
@@ -80,7 +77,7 @@ class EventTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("simulation.subscribed"), "onPostBuildProposal")
         self.assertEqual(self.lua.eval("#simulation.value.jobs"), 1)
         self.assertEqual(self.lua.eval("#calls"), 1)
-        self.assertEqual(self.lua.eval("calls[1].proposal.minimum"), 350)
+        self.assertEqual(self.lua.eval("calls[1].proposal.spacing"), 350)
         self.assertEqual(self.lua.eval("calls[1].context.player"), 7)
         self.assertFalse(self.lua.eval("calls[1].player"))
 
@@ -102,7 +99,7 @@ class EventTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("#calls"), 1)
         self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
         self.assertEqual(self.lua.eval("#calls"), 2)
-        self.assertEqual(self.lua.eval("calls[2].proposal.minimum"), 500)
+        self.assertEqual(self.lua.eval("calls[2].proposal.spacing"), 500)
 
     def test_failed_command_reports_error_and_releases_queue(self):
         self.lua.execute("place(100, 2, 300); handlers.guiUpdate(nil, simulation, gui)")
@@ -121,76 +118,56 @@ class EventTests(unittest.TestCase):
         self.lua.execute("handlers.guiUpdate(nil, simulation, gui)")
         self.assertEqual(self.lua.eval("#calls"), 0)
 
-    def test_critical_rejection_tries_a_new_position_then_stops_after_success(self):
-        self.lua.execute("place(100, 2, 226); handlers.guiUpdate(nil, simulation, gui)")
+    def test_critical_rejection_does_not_retry_or_block_next_job(self):
+        self.lua.execute("place(100, 2, 226); place(101, 2, 350); handlers.guiUpdate(nil, simulation, gui)")
         self.lua.execute("""
-          completion({resultProposalData={errorState={critical=true, messages={'cannot build'}}}}, false)
+            completion({resultProposalData={errorState={critical=true, messages={'cannot build'}}}}, false)
+            handlers.guiUpdate(nil, simulation, gui)
         """)
-        self.assertEqual(self.lua.eval("#calls"), 1)
-        self.lua.execute("handlers.guiUpdate(nil, simulation, gui)")
         self.assertEqual(self.lua.eval("#calls"), 2)
-        self.assertNotEqual(
-            self.lua.eval("calls[1].proposal.positions[1]"),
-            self.lua.eval("calls[2].proposal.positions[1]"),
-        )
-        self.assertEqual(self.lua.eval("calls[1].proposal.minimum"), 226)
-        self.assertEqual(self.lua.eval("calls[2].proposal.minimum"), 226)
-        self.lua.execute("handlers.guiUpdate(nil, simulation, gui)")
-        self.assertEqual(self.lua.eval("#calls"), 2)
-        self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
-        self.lua.execute("handlers.guiUpdate(nil, simulation, gui)")
-        self.assertEqual(self.lua.eval("#calls"), 2)
-        self.assertEqual(self.lua.eval("#warnings"), 0)
-
-    def test_failed_alternatives_finish_without_repeating_positions_and_release_next_job(self):
-        self.lua.execute("""
-          local originalPlan = networkFake.plan
-          networkFake.plan = function(entity, minimum, layout)
-            local plan = originalPlan(entity, minimum, layout)
-            -- A constrained allowed range can make two phases choose the same point.
-            if layout.phase == 1 then
-              plan.positions = {750}
-            end
-            return plan
-          end
-          place(100, 2, 226); place(101, 2, 350)
-          handlers.guiUpdate(nil, simulation, gui)
-        """)
-        for _ in range(4):
-            self.lua.execute("""
-              completion({resultProposalData={errorState={critical=true, messages={'cannot build'}}}}, false)
-              handlers.guiUpdate(nil, simulation, gui)
-            """)
-        self.assertEqual(self.lua.eval("#calls"), 5)
-        positions = []
-        for index in range(1, 5):
-            self.assertEqual(self.lua.eval(f"calls[{index}].proposal.entity"), 100)
-            self.assertEqual(self.lua.eval(f"calls[{index}].proposal.minimum"), 226)
-            positions.append(self.lua.eval(f"calls[{index}].proposal.positions[1]"))
-        self.assertEqual(len(set(positions)), 4)
-        self.assertIn("no accepted layout after 4 attempts", self.lua.eval("warnings[1]"))
-        self.assertEqual(self.lua.eval("calls[5].proposal.entity"), 101)
-        self.assertEqual(self.lua.eval("calls[5].proposal.minimum"), 350)
-        self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
-        self.assertEqual(self.lua.eval("#calls"), 5)
-
-    def test_changed_track_section_ends_recovery_and_allows_a_new_job(self):
-        self.lua.execute("place(100, 2, 226); handlers.guiUpdate(nil, simulation, gui)")
-        self.lua.execute("""
-          local originalPlan = networkFake.plan
-          networkFake.plan = function(entity, minimum, layout)
-            local plan = originalPlan(entity, minimum, layout)
-            plan.sourceEdges = {10, 11}
-            return plan
-          end
-          completion({resultProposalData={errorState={critical=true, messages={'cannot build'}}}}, false)
-          handlers.guiUpdate(nil, simulation, gui)
-        """)
-        self.assertEqual(self.lua.eval("#calls"), 1)
-        self.assertIn("track section changed", self.lua.eval("warnings[1]"))
-        self.lua.execute("place(101, 2, 350); handlers.guiUpdate(nil, simulation, gui)")
-        self.assertEqual(self.lua.eval("#calls"), 2)
+        self.assertEqual(self.lua.eval("calls[1].proposal.entity"), 100)
         self.assertEqual(self.lua.eval("calls[2].proposal.entity"), 101)
+        self.assertIn("cannot build", self.lua.eval("warnings[1]"))
+        self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
+        self.assertEqual(self.lua.eval("#calls"), 2)
+
+    def test_planning_rejection_never_submits_a_partial_build(self):
+        self.lua.execute("""
+            local original = networkFake.plan
+            networkFake.plan = function(entity, gap)
+                if entity == 100 then return nil, 'fixed point unavailable' end
+                return original(entity, gap)
+            end
+            place(100, 2, 300); place(101, 2, 300)
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 1)
+        self.assertEqual(self.lua.eval("calls[1].proposal.entity"), 101)
+        self.assertIn("fixed point unavailable", self.lua.eval("warnings[1]"))
+
+    def test_missing_geometry_reports_error_without_removing_seed(self):
+        self.lua.execute("""
+            networkFake.plan = function() error('track geometry unavailable') end
+            place(100, 2, 300); handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 0)
+        self.assertTrue(self.lua.eval("components[100] ~= nil"))
+        self.assertIn("geometry unavailable", self.lua.eval("warnings[1]"))
+
+    def test_typed_spacing_outside_slider_range_is_accepted(self):
+        for gap in (1, 25, 320, 1200, 5000):
+            with self.subTest(gap=gap):
+                self.lua.execute(f"place({100+gap}, 2, {gap}); handlers.guiUpdate(nil, simulation, gui)")
+                self.assertEqual(self.lua.eval("calls[#calls].proposal.spacing"), gap)
+                self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
+
+    def test_zero_fractional_and_nonfinite_spacing_does_not_enqueue(self):
+        self.lua.execute("""
+            place(100, 2, 0); place(101, 2, -1); place(102, 2, 1.5)
+            place(103, 2, math.huge); place(104, 2, 0/0)
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 0)
 
 
 if __name__ == "__main__":
