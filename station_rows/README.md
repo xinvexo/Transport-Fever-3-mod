@@ -14,10 +14,14 @@
 
 整列增删流程已通过游戏内反馈确认。空位计算、Shift 输入、引擎施工通知衔接和串行命令使用 Lua 模拟测试验证。
 
-## 打包与安装
+## 开发、打包与安装
 
-运行 `python3 tools/package_mod.py` 生成 `dist/xin_station_rows_1.zip`。
+Windows/macOS 共用仓库根目录的开发环境和依赖，配置方法见[项目说明](../README.md#开发测试)。以下命令均在仓库根目录运行：
 
-运行 `python3 tools/package_mod.py --install "/path/to/game/mods"` 同时安装。
+```sh
+python tools/test_mods.py station_rows
+python tools/package_mod.py station_rows
+python tools/package_mod.py station_rows --install '/path/to/game/mods'
+```
 
-开发测试：安装 `requirements-dev.txt` 后运行 `python3 -m unittest discover -s tests -v`。
+输出 `station_rows/dist/xin_station_rows_1.zip`，只包含游戏资源；`--install` 指定本地 mod 父目录。打包产物仅供本地使用，不入库。

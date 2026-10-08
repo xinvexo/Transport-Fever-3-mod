@@ -140,10 +140,10 @@ class AlternativesTests(unittest.TestCase):
         for name in ("selection", "assignment"):
             self.lua.globals().modules[
                 f"xin_auto_alternatives_1::/auto_alternatives/{name}.lua"
-            ] = self.lua.execute((CONTENT / f"{name}.lua").read_text())
-        self.lua.execute((CONTENT / "ui_entry.script.lua").read_text())
+            ] = self.lua.execute((CONTENT / f"{name}.lua").read_text(encoding="utf-8"))
+        self.lua.execute((CONTENT / "ui_entry.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("uiEntry = data().entry; uiEntry()")
-        self.lua.execute((CONTENT / "events.script.lua").read_text())
+        self.lua.execute((CONTENT / "events.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("handlers = data()")
         self.tick()
 

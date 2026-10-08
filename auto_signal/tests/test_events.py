@@ -72,7 +72,7 @@ class EventTests(unittest.TestCase):
               { { proposal = street }, {}, {}, playerInitiated ~= false })
           end
         """)
-        self.lua.execute((ROOT / "content/auto_signal/events.script.lua").read_text())
+        self.lua.execute((ROOT / "content/auto_signal/events.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("handlers = data(); handlers.update(nil, simulation); handlers.guiUpdate(nil, simulation, gui)")
 
     def test_player_placement_enqueues_once_and_builds_with_meters(self):

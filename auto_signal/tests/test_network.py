@@ -73,9 +73,9 @@ class TrackWorld:
             lambda entity: self.hosts.get(entity, -1)
         )
         api.engine.system.signalSystem.getSignal = self.get_signal
-        spacing = self.lua.execute((ROOT / "content/auto_signal/spacing.lua").read_text())
+        spacing = self.lua.execute((ROOT / "content/auto_signal/spacing.lua").read_text(encoding="utf-8"))
         self.lua.globals().ug_require = lambda path: spacing
-        self.network = self.lua.execute((ROOT / "content/auto_signal/network.lua").read_text())
+        self.network = self.lua.execute((ROOT / "content/auto_signal/network.lua").read_text(encoding="utf-8"))
 
     def table(self, value):
         return self.lua.table_from(value, recursive=True)

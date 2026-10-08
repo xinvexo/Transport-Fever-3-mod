@@ -15,7 +15,7 @@ class SpacingTests(unittest.TestCase):
     def setUpClass(cls):
         cls.lua = LuaRuntime(unpack_returned_tuples=True)
         cls.planner = cls.lua.execute(
-            (ROOT / "content/auto_signal/spacing.lua").read_text()
+            (ROOT / "content/auto_signal/spacing.lua").read_text(encoding="utf-8")
         )["plan"]
 
     def plan(self, intervals, minimum, maximum=None, layout=None):

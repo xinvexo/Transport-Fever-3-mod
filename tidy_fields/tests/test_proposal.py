@@ -95,10 +95,10 @@ class ProposalTests(unittest.TestCase):
             end
         """)
         self.lua.globals().layout = self.lua.execute(
-            (ROOT / "content/tidy_fields/layout.lua").read_text()
+            (ROOT / "content/tidy_fields/layout.lua").read_text(encoding="utf-8")
         )
         self.lua.globals().proposal = self.lua.execute(
-            (ROOT / "content/tidy_fields/proposal.lua").read_text()
+            (ROOT / "content/tidy_fields/proposal.lua").read_text(encoding="utf-8")
         )
 
     def test_keeps_modules_and_original_parameters(self):

@@ -17,7 +17,7 @@ from zipfile import ZipFile
 from lupa.lua52 import LuaRuntime
 
 
-GAME_DIR = Path(os.environ.get("TF3_GAME_DIR", str(Path.home() / "Library/Application Support/Steam/steamapps/common/Transport Fever 3")))
+GAME_DIR = Path(os.environ["TF3_GAME_DIR"]).expanduser() if os.environ.get("TF3_GAME_DIR") else None
 MOD_DIR = Path(__file__).resolve().parents[1]
 
 PRELUDE = r"""
@@ -81,7 +81,7 @@ end
 class IndustryPotentialTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not (GAME_DIR / "base/content/industries/industryutil.lua").is_file():
+        if GAME_DIR is None or not (GAME_DIR / "base/content/industries/industryutil.lua").is_file():
             raise unittest.SkipTest("local TF3 game files unavailable; set TF3_GAME_DIR")
         cls.lua = LuaRuntime(unpack_returned_tuples=True)
         cls.lua.execute(PRELUDE)
@@ -91,7 +91,7 @@ class IndustryPotentialTests(unittest.TestCase):
             source = (industry_dir / f"{name}.lua").read_text(encoding="utf-8-sig")
             cls.env.modules[f"/industries/{name}.lua"] = cls.lua.execute(source)
         cls.env.modules["::/industries/industryutil.lua"] = cls.env.modules["/industries/industryutil.lua"]
-        cls.layout = cls.lua.execute((MOD_DIR / "content/tidy_fields/layout.lua").read_text())
+        cls.layout = cls.lua.execute((MOD_DIR / "content/tidy_fields/layout.lua").read_text(encoding="utf-8"))
         cls.env.modules["xin_tidy_fields_1::/tidy_fields/layout.lua"] = cls.layout
 
         cls.constructors = {}
@@ -104,9 +104,9 @@ class IndustryPotentialTests(unittest.TestCase):
         if not cls.constructors:
             raise RuntimeError(f"No industry constructors found in {industry_dir}")
 
-        entry = json.loads((MOD_DIR / "mod.json").read_text())["runScript"]["fileName"]
+        entry = json.loads((MOD_DIR / "mod.json").read_text(encoding="utf-8"))["runScript"]["fileName"]
         resource, function = entry.split("::/", 1)[1].split("@", 1)
-        cls.lua.execute((MOD_DIR / "content" / (resource + ".lua")).read_text())
+        cls.lua.execute((MOD_DIR / "content" / (resource + ".lua")).read_text(encoding="utf-8"))
         cls.env.data()[function]()
         cls.original = cls.env.modules["/industries/industryutil.lua"]["makeIndustryUpdateFn"](
             cls.lua.eval("{static = {}, level1 = {}}")
@@ -125,7 +125,7 @@ class IndustryPotentialTests(unittest.TestCase):
             if reference.startswith("xin_tidy_fields_1::/"):
                 cls.redirected.add(filename)
                 script_resource = reference.split("::/", 1)[1]
-                source = (MOD_DIR / "content" / (script_resource + ".lua")).read_text()
+                source = (MOD_DIR / "content" / (script_resource + ".lua")).read_text(encoding="utf-8")
                 script_name = reference + ".lua"
             else:
                 industry = filename.split("/", 1)[0]

@@ -1,6 +1,6 @@
 # 工厂地块规整
 
-Transport Fever 3 模组，支持原版作物农场、牲畜养殖场、棉花农场、橡胶农场和伐木场的地块整理，并包含可扩建产业的最大成长上限功能。
+Transport Fever 3 模组，ID 为 `xin_tidy_fields_1`。支持原版作物农场、牲畜养殖场、棉花农场、橡胶农场和伐木场的地块整理，并包含可扩建产业的最大成长上限功能。
 
 ## 产业成长上限
 
@@ -30,13 +30,16 @@ Transport Fever 3 模组，支持原版作物农场、牲畜养殖场、棉花�
 
 ## 开发与验证
 
-`content/tidy_fields/generated` 保存当前游戏版本的原版农场模型布局；游戏更新农场资源后，可用 `tools/import_farms.py` 从安装目录重新导入。地块绘制和生产计算继续使用游戏自带的公共脚本。
+`content/tidy_fields/generated` 保存当前游戏版本的原版农场模型布局，是运行资源。游戏更新农场资源后，可在仓库根目录运行 `python tidy_fields/tools/import_farms.py '/path/to/Transport Fever 3'` 重新导入，输出统一为 UTF-8 和 LF 换行。地块绘制和生产计算继续使用游戏自带的公共脚本。
 
 Lua模拟测试覆盖产业生成上限、布局、道路避让、原版生产计算、地块数量保留、方向选择和重复整理。模拟测试不代替游戏内验证；当前版本的实际画面尚需确认。
 
+Windows/macOS 共用仓库根目录的开发环境和依赖，配置方法见[项目说明](../README.md#开发测试)。涉及原生游戏资源的测试通过 `TF3_GAME_DIR` 指定安装位置；未设置或找不到资源时明确跳过。以下命令均在仓库根目录运行：
+
 ```sh
-python -X utf8 -B -m unittest discover -s tests -v
-python tools/package_mod.py --install '/path/to/game/mods'
+python tools/test_mods.py tidy_fields
+python tools/package_mod.py tidy_fields
+python tools/package_mod.py tidy_fields --install '/path/to/game/mods'
 ```
 
-Windows 环境、统一测试入口及 `TF3_GAME_DIR` 配置见仓库根目录 README。修订 16 使用原生 `NinePatch` 对象创建方向按钮，修复打开产业界面时的类型错误。打包产物仅供本地安装，不入库。
+输出 `tidy_fields/dist/xin_tidy_fields_1.zip`，只包含游戏资源；`--install` 指定本地 mod 父目录。打包产物仅供本地安装，不入库。修订 16 使用原生 `NinePatch` 对象创建方向按钮，修复打开产业界面时的类型错误。

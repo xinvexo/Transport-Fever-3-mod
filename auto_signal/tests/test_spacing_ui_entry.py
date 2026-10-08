@@ -67,7 +67,7 @@ class SpacingUiEntryTests(unittest.TestCase):
             function ug_require(path) return assert(modules[path], path) end
         """)
         self.lua.execute(
-            (ROOT / "content/auto_signal/ui_entry.script.lua").read_text()
+            (ROOT / "content/auto_signal/ui_entry.script.lua").read_text(encoding="utf-8")
         )
         self.entry = self.lua.globals().data()
         self.construction = self.lua.globals().constructionUtil
@@ -119,7 +119,7 @@ class SpacingUiEntryTests(unittest.TestCase):
         self.assertEqual(self.calls.plugins, 1)
 
     def test_resource_points_to_the_registered_gui_entry(self):
-        self.lua.execute((ROOT / "content/auto_signal/ui_entry.res.lua").read_text())
+        self.lua.execute((ROOT / "content/auto_signal/ui_entry.res.lua").read_text(encoding="utf-8"))
         resource = self.lua.globals().data()
         self.assertEqual(resource.type, "react-plugin ::ModEntryPointExtension")
         self.assertEqual(resource.data.filePath,

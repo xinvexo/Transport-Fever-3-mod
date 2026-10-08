@@ -9,7 +9,7 @@ from lupa.lua52 import LuaRuntime
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GAME = Path(os.environ.get("TF3_GAME_DIR", str(Path.home() / "Library/Application Support/Steam/steamapps/common/Transport Fever 3")))
+GAME = Path(os.environ["TF3_GAME_DIR"]).expanduser() if os.environ.get("TF3_GAME_DIR") else None
 
 
 def values(table):
@@ -19,15 +19,15 @@ def values(table):
 class LayoutTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.layout = self.lua.execute((ROOT / "content/tidy_fields/layout.lua").read_text())
+        self.layout = self.lua.execute((ROOT / "content/tidy_fields/layout.lua").read_text(encoding="utf-8"))
         self.lua.globals().layout = self.layout
         self.lua.execute('package.loaded["xin_tidy_fields_1::/tidy_fields/layout.lua"] = layout')
         self.lua.execute('log = { message = function() end }')
         self.modifiers = {}
         self.lua.globals().addModifier = lambda name, callback: self.modifiers.__setitem__(name, callback)
-        script = json.loads((ROOT / "mod.json").read_text())["runScript"]["fileName"]
+        script = json.loads((ROOT / "mod.json").read_text(encoding="utf-8"))["runScript"]["fileName"]
         resource, function = script.split("::/", 1)[1].split("@", 1)
-        self.lua.execute((ROOT / "content" / (resource + ".lua")).read_text())
+        self.lua.execute((ROOT / "content" / (resource + ".lua")).read_text(encoding="utf-8"))
         self.lua.globals().data()[function]()
         self.modifier = self.modifiers["loadConstruction"]
 
@@ -322,7 +322,8 @@ class LayoutTests(unittest.TestCase):
         wrapped(capture, params)
         self.assertTrue(same(seen.capture, capture))
 
-    @unittest.skipUnless((GAME / "base/content/industries/industryutil.lua").exists(), "local TF3 game files unavailable")
+    @unittest.skipUnless(GAME is not None and (GAME / "base/content/industries/industryutil.lua").is_file(),
+                         "local TF3 game files unavailable; set TF3_GAME_DIR")
     def test_vanilla_production_and_stocks_survive_wrapped_layout(self):
         self.lua.execute("""
             package.loaded["::/scripts/construction/laneutil.lua"] = {}
@@ -338,10 +339,10 @@ class LayoutTests(unittest.TestCase):
             math.round = function(value) return math.floor(value + 0.5) end
             string.starts = function(value, prefix) return value:sub(1, #prefix) == prefix end
         """)
-        fieldutil = self.lua.execute((GAME / "base/content/industries/fieldutil.lua").read_text())
+        fieldutil = self.lua.execute((GAME / "base/content/industries/fieldutil.lua").read_text(encoding="utf-8-sig"))
         self.lua.globals().fieldutil = fieldutil
         self.lua.execute('package.loaded["/industries/fieldutil.lua"] = fieldutil')
-        industryutil = self.lua.execute((GAME / "base/content/industries/industryutil.lua").read_text())
+        industryutil = self.lua.execute((GAME / "base/content/industries/industryutil.lua").read_text(encoding="utf-8-sig"))
         update = industryutil.makeIndustryUpdateFn(self.lua.table_from({"static": {}, "level1": {}}, recursive=True))
         wrapped = self.layout.wrap(update)
         results = []

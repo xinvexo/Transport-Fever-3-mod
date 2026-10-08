@@ -226,10 +226,10 @@ class NativeStationRowsTests(unittest.TestCase):
         for name in ("rows", "proposal", "sequence"):
             self.lua.globals().modules[
                 f"xin_station_rows_1::/station_rows/{name}.lua"
-            ] = self.lua.execute((CONTENT / f"{name}.lua").read_text())
-        self.lua.execute((CONTENT / "events.script.lua").read_text())
+            ] = self.lua.execute((CONTENT / f"{name}.lua").read_text(encoding="utf-8"))
+        self.lua.execute((CONTENT / "events.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("handlers = data(); lane = 'engine'; handlers.update(nil, engineState); lane = 'gui'; claim()")
-        self.lua.execute((CONTENT / "ui_entry.script.lua").read_text())
+        self.lua.execute((CONTENT / "ui_entry.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("data().entry(); flushScripts(); sent = {}; renderNative()")
         self.lua.execute("sequence = modules['xin_station_rows_1::/station_rows/sequence.lua']")
 

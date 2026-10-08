@@ -1,5 +1,7 @@
 # 两点铁路回环 · 本地开发版 r3.2
 
+《狂热运输 3》模组，ID 为 `xin_smooth_rail_loop_1`。
+
 入口位于原生铁路铺轨菜单左侧的模式栏：第三个回环图标。选择普通轨道类型后，在两条已有轨道上各点一个连接点。工具按连接点的位置和切向生成回环，鼠标沿轨道方向移动调整延伸长度，移到另一侧改变回环方向。
 
 沿用原菜单的高度、弯曲、自动对齐、桥型、隧道类型和地下显示开关，没有额外的长度、高度或方向面板。新轨道采用当前菜单选中的轨型；原轨道切分后保持原有轨型、接触网和桥隧类型。
@@ -29,6 +31,12 @@
 
 ## 开发
 
-本目录是回环模组的开发源码。在仓库根目录运行 `python tools/test_mods.py smooth_rail_loop`，执行 Lua 5.2 几何、菜单/施工方案和跨版本方向角回归测试。依赖见根目录 `requirements-dev.txt`；测试不生成图片或报告文件。
+Windows/macOS 共用仓库根目录的开发环境和依赖，配置方法见[项目说明](../README.md#开发测试)。测试覆盖 Lua 5.2 几何、菜单/施工方案和跨版本方向角，不生成图片或报告文件。以下命令均在仓库根目录运行：
 
-按需在本目录运行 `python tools/package_mod.py`，输出本地 `dist/xin_smooth_rail_loop_1.zip`；附加 `--install /path/to/game/mods` 可安装到指定父目录。打包产物不入库、不上传。完整 Windows/macOS 开发方法见仓库根目录 README。
+```sh
+python tools/test_mods.py smooth_rail_loop
+python tools/package_mod.py smooth_rail_loop
+python tools/package_mod.py smooth_rail_loop --install '/path/to/game/mods'
+```
+
+输出 `smooth_rail_loop/dist/xin_smooth_rail_loop_1.zip`，只包含游戏资源；`--install` 指定本地 mod 父目录。打包产物仅供本地使用，不入库、不上传。

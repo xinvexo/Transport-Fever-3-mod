@@ -17,7 +17,7 @@ def import_farms(game):
     for farm in FARMS:
         with ZipFile(game / "base/content/industries" / f"{farm}.zip") as archive:
             source = archive.read(f"{farm}/{farm}.script.lua").decode("utf-8-sig")
-        generated = source[source.index("local generatedData ="):source.index("--End Generated")]
+        generated = source[source.index("local generatedData ="):source.index("--End Generated")].replace("\r\n", "\n")
 
         # These scripts live in our mod; resolve the vanilla models in their original scope.
         def resource(match):
@@ -36,7 +36,8 @@ def import_farms(game):
             + '  return { updateFn = layout.wrap(industryutil.makeIndustryUpdateFn(generatedData)) }\n'
             + 'end\n'
         )
-        (destination / f"{farm}.script.lua").write_text(script)
+        with (destination / f"{farm}.script.lua").open("w", encoding="utf-8", newline="\n") as output:
+            output.write(script)
         print(f"Imported {farm}")
 
 

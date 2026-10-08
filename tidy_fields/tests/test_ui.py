@@ -92,9 +92,9 @@ class TidyFieldsUiTests(unittest.TestCase):
                     or find(node.layout, kind, tag)
             end
         """)
-        proposal = self.lua.execute((ROOT / "content/tidy_fields/proposal.lua").read_text())
+        proposal = self.lua.execute((ROOT / "content/tidy_fields/proposal.lua").read_text(encoding="utf-8"))
         self.lua.globals().proposals.describeFailure = proposal.describeFailure
-        self.ui = self.lua.execute((ROOT / "content/tidy_fields/ui.script.lua").read_text())
+        self.ui = self.lua.execute((ROOT / "content/tidy_fields/ui.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("ui = data(); uiParams = {entityId = 11, ownershipState = 'Own'}")
 
     def render(self):

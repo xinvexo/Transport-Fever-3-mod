@@ -8,7 +8,7 @@
 
 ## 使用
 
-1. 将 `dist/xin_auto_alternatives_1.zip` 解压到游戏本地 mod 目录，确保该目录下出现 `xin_auto_alternatives_1/mod.json`。
+1. 按下方步骤打包，再将 `dist/xin_auto_alternatives_1.zip` 解压到游戏本地 mod 目录，确保该目录下出现 `xin_auto_alternatives_1/mod.json`；也可用 `--install` 安装。
 2. 在存档的模组列表中启用“自动备用站台”，进入游戏。
 3. 在线路管理器中添加停靠站。原版完成主站台分配后，其余匹配位置会随本次线路保存一起补为备用，无需逐个勾选。随后可以手动把任意备用站台改为“不使用”。
 
@@ -31,25 +31,19 @@
 - 主站台尚未确定或暂时不存在时，等待游戏完成分配后再处理。
 - 本 mod 自动完成备用勾选，不执行车辆调度。路网连通性、方向、站台长度、电气化和货物专用设施等限制仍由游戏判断；匹配类型不等于保证车辆可达。若游戏显示无路径，可以调整站场连接，或把对应站台设为“不使用”。
 
-## 打包
+## 开发、打包与安装
+
+Windows/macOS 共用仓库根目录的开发环境和依赖，配置方法见[项目说明](../README.md#开发测试)。以下命令均在仓库根目录运行：
 
 ```sh
-python3 tools/package_mod.py
+python tools/test_mods.py auto_alternatives
+python tools/package_mod.py auto_alternatives
+python tools/package_mod.py auto_alternatives --install '/path/to/game/mods'
 ```
 
-输出 `dist/xin_auto_alternatives_1.zip`，只包含游戏资源。也可以指定本地 mod 父目录进行安装：
-
-```sh
-python3 tools/package_mod.py --install "/path/to/game/mods"
-```
+输出 `auto_alternatives/dist/xin_auto_alternatives_1.zip`，只包含游戏资源；`--install` 指定本地 mod 父目录。打包产物仅供本地使用，不入库。
 
 ## 测试与接口依据
-
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m unittest discover -s tests -v
-```
 
 实现依据本机游戏的 API 声明及原版线路管理界面：通过 `ModEntryPointExtension` 在 React 界面环境中扩展 `line_util.autoAssignTerminals`，仅为未初始化备用列表的新停靠补选；扩建订阅 `onPreBuildProposal` 和 `onPostBuildProposal`，比较 `Station.tag` 与 `Terminal.tag`，通过 `getLineStops` 查询关联线路。`api.type.Line.new` 保留已有线路配置，`api.type.StationTerminal.new` 使用从 0 开始的站台索引，`api.cmd.makeLineUpdateCmd` 提交扩建后的定向更新。公开参考：[脚本命令文档](https://wiki.transportfever3.com/script-doc/api/cmd.html)。
 

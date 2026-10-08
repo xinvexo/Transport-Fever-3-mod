@@ -63,7 +63,7 @@ class SpacingWidgetTests(unittest.TestCase):
             }
         """)
         self.widget = self.lua.execute(
-            (ROOT / "content/auto_signal/spacing_widget.lua").read_text()
+            (ROOT / "content/auto_signal/spacing_widget.lua").read_text(encoding="utf-8")
         )
         self.commits = []
         self.param = self.lua.table_from({

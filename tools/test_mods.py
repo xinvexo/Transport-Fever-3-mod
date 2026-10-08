@@ -18,18 +18,20 @@ def main():
     if unknown:
         parser.error('Unknown mod directories: ' + ', '.join(sorted(unknown)))
     failed = []
-    for mod in selected:
-        print(f'Running {mod}', flush=True)
+    suites = [('repository tools', ROOT, 'tools/tests')]
+    suites.extend((mod, ROOT / mod, 'tests') for mod in selected)
+    for name, directory, tests in suites:
+        print(f'Running {name}', flush=True)
         result = subprocess.run(
-            [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest', 'discover', '-s', 'tests', '-v'],
-            cwd=ROOT / mod,
+            [sys.executable, '-B', '-X', 'utf8', '-m', 'unittest', 'discover', '-s', tests, '-v'],
+            cwd=directory,
         )
         if result.returncode:
-            failed.append(mod)
+            failed.append(name)
     if failed:
         print('Failed: ' + ', '.join(failed), file=sys.stderr)
         return 1
-    print(f'Passed: {len(selected)} mod suites')
+    print(f'Passed: repository tools and {len(selected)} mod suites')
     return 0
 
 

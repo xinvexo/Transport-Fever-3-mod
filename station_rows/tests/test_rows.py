@@ -19,7 +19,7 @@ def module(name, variant=1):
 class RowTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.rows = self.lua.execute((ROOT / "content/station_rows/rows.lua").read_text())
+        self.rows = self.lua.execute((ROOT / "content/station_rows/rows.lua").read_text(encoding="utf-8"))
 
     def table(self, value):
         return self.lua.table_from(value, recursive=True)

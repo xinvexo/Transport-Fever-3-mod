@@ -33,30 +33,28 @@
 
 ## 打包与安装
 
-只打包，无需安装开发依赖：
+以下命令在仓库根目录运行，打包无需安装开发依赖：
 
 ```sh
-python3 tools/package_mod.py
+python tools/package_mod.py auto_signal
 ```
 
-生成 `dist/xin_auto_signal_1.zip`。压缩包外层目录为 `xin_auto_signal_1`，只包含 `mod.json`、`strings.json`、`_metadata/` 和 `content/`，可解压到游戏的本地 mod 目录。
+生成 `auto_signal/dist/xin_auto_signal_1.zip`。压缩包外层目录为 `xin_auto_signal_1`，只包含 `mod.json`、`strings.json`、`_metadata/` 和 `content/`，可解压到游戏的本地 mod 目录。产物仅供本地使用，不入库。
 
 也可指定本地 mod 父目录，在打包后安装：
 
 ```sh
-python3 tools/package_mod.py --install "/path/to/game/mods"
+python tools/package_mod.py auto_signal --install '/path/to/game/mods'
 ```
 
 安装位置为 `/path/to/game/mods/xin_auto_signal_1`。更新时只替换该 mod 的四项资源；如果同名目录的 `mod.json` 无法确认属于本 mod，安装会报错。开发环境和测试文件不会安装到游戏目录。
 
 ## 开发与验证
 
-运行开发测试需要 Python 和 Lupa；游戏运行不需要这些依赖。
+Windows/macOS 共用仓库根目录的开发环境和依赖，配置方法见[项目说明](../README.md#开发测试)。游戏运行不需要这些依赖。在仓库根目录运行：
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m unittest discover -s tests -v
+python tools/test_mods.py auto_signal
 ```
 
 Lua 脚本位于 `content/`。`spacing.lua` 负责在允许区间内布点，`network.lua` 负责轨道区段识别，事件脚本负责读取设置并提交建造操作。语言文本位于 `strings.json`。

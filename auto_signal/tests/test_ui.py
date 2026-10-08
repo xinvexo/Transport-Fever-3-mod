@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class SignalUiTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.translations = json.loads((ROOT / "strings.json").read_text())
+        self.translations = json.loads((ROOT / "strings.json").read_text(encoding="utf-8"))
         self.set_language("en")
         self.modifier = None
 
@@ -31,7 +31,7 @@ class SignalUiTests(unittest.TestCase):
         )
 
     def load_script(self, path):
-        self.lua.execute((ROOT / path).read_text())
+        self.lua.execute((ROOT / path).read_text(encoding="utf-8"))
         return self.lua.globals().data()
 
     def signal_params(self, resource="base::/infrastructure/signal/signal_path_a.con"):
