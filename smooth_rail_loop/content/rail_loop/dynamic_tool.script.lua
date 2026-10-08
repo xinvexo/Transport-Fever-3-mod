@@ -60,6 +60,7 @@ local function Tool(params)
   local function reset()
     if not active() or s.busy then return end
     invalidate();s.points = {};s.hover = nil;s.hoverReason = nil
+    s.fixedMarkerKey=nil;s.fixedMarkerEdges=nil
     s.extension = 0;s.direction = 1;s.pendingShape = nil;s.message = "① 点击第一条轨道上的连接点";refresh()
   end
   local function back()
@@ -239,14 +240,15 @@ local function Tool(params)
       end,
       onSelect = pick,
       onSelectSecondary = function() back();return true end,
-      selectionColor = api.type.Vec4f.new(0.1,0.9,0.8,0.4),
-      selectionOutlineColor = api.type.Vec4f.new(0.1,0.9,0.8,0.8),
-      selectionOutlineColor1 = api.type.Vec4f.new(0.1,0.9,0.8,1),
+      selectionColor = api.type.Vec4f.new(0,0,0,0),
+      selectionOutlineColor = api.type.Vec4f.new(0,0,0,0),
+      selectionOutlineColor1 = api.type.Vec4f.new(0,0,0,0),
     },
   }
+  local viewer
   if s.proposal then
     local serial = s.serial
-    children[#children+1] = builtin.ProposalViewer{
+    viewer = {
       simpleProposal = s.proposal,
       entityForRefundableContext = api.engine.util.getPlayer(),
       proposalId = "xin-dynamic-loop:"..tostring(s)..":"..serial,
@@ -305,25 +307,39 @@ local function Tool(params)
           diagnostics.last.x,diagnostics.last.y,diagnostics.last.z,diagnostics.maxError))
       end
     end
-    if s.renderEdges then
-      children[#children+1]=builtin.EdgeRenderable{edges=s.renderEdges,ignoreDepth=true}
-    end
   end
-  local function addPoint(point,key,isHover)
-    local ok,control=pcall(previewUtil.controlPoint,point,isHover,isHover and s.hoverReason~=nil)
+  -- Native CollectActionConfig permits exactly one ProposalViewer per action.
+  -- Merge the active control point into the construction viewer; other fixed
+  -- points are tiny markers in the existing edge-render batch.
+  local activePoint=s.hover or s.points[#s.points]
+  if activePoint then
+    local isHover=s.hover~=nil
+    local ok,control=pcall(previewUtil.controlPoint,activePoint,isHover,isHover and s.hoverReason~=nil)
     if ok then
-      children[#children+1]=builtin.ProposalViewer{
-        controlPointInfo=control,proposalId="xin-loop-point:"..tostring(s)..":"..key,
-      }
+      viewer=viewer or {proposalId="xin-loop-point:"..tostring(s)}
+      viewer.controlPointInfo=control
     elseif not s.loggedMarkerError then
       s.loggedMarkerError=true;log.message("[Rail Loop] Point marker failed: "..errorMessage(control))
     end
   end
-  for index,point in ipairs(s.points) do addPoint(point,tostring(index),false) end
-  if s.hover and #s.points<2 then addPoint(s.hover,"hover",true) end
+  if viewer then children[#children+1]=builtin.ProposalViewer(viewer) end
+  local renderEdges={}
+  for _,edge in ipairs(s.renderEdges or {}) do renderEdges[#renderEdges+1]=edge end
+  for _,point in ipairs(s.points) do
+    if point~=activePoint then
+      local key=pointKey(point)
+      if key~=s.fixedMarkerKey then
+        local ok,edges=pcall(previewUtil.fixedPoint,point)
+        s.fixedMarkerKey=key;s.fixedMarkerEdges=ok and edges or nil
+        if not ok then log.message("[Rail Loop] Fixed point marker failed: "..errorMessage(edges)) end
+      end
+      for _,edge in ipairs(s.fixedMarkerEdges or {}) do renderEdges[#renderEdges+1]=edge end
+    end
+  end
+  if #renderEdges>0 then children[#children+1]=builtin.EdgeRenderable{edges=renderEdges,ignoreDepth=true} end
   local message = s.message
   if s.hoverReason then message=s.hoverReason
-  elseif s.hover and s.hover.snapped then message=message.."\n已吸附轨道端点" end
+  end
   if s.renderError then message=message.."\n轨迹预览未能显示，错误已记录。" end
   if s.info then message = message..string.format("\n长度 %.0f m",s.info.length) end
   children[#children+1] = builtin.ActionTooltip{
@@ -368,8 +384,7 @@ local function Tool(params)
   end
   return builtin.ActionDescriptor{
     tool = "construction-menu-tracks",terrainCirclePolicy = "Never",
-    highlightedEntities = #s.points==2 and {s.points[1].entity,s.points[2].entity} or
-      (#s.points==1 and {s.points[1].entity} or {}),
+    highlightedEntities = {},
     onBack = back,
     children = children,
   }
@@ -432,5 +447,5 @@ end
 
 local entry = react.RegisterPluginRecipe(entryPoint.ModEntryPointExtension,
   "XinNativeRailLoopEntry",function() return nil end)
-log.message("[Rail Loop] Native track mode installed (revision 6).")
+log.message("[Rail Loop] Native track mode installed (revision 7).")
 function data() return {entry=entry} end

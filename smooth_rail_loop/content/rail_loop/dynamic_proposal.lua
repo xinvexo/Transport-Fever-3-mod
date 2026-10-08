@@ -32,11 +32,9 @@ function M.resnap(point,snapping)
     for _,endpoint in ipairs({0,1}) do
       local q=sample(edge,endpoint)
       local distance=(p[1]-q[1])^2+(p[2]-q[2])^2+(p[3]-q[3])^2
-      local close=distance<4
-      if not close and distance<100 and point.mouse then
-        local screen=api.gui.camera.world2Screen(vec(q))
-        close=(screen.x-point.mouse.x)^2+(screen.y-point.mouse.y)^2<=64
-      end
+      -- Track picking follows its centreline. Only a near-exact node hit may
+      -- snap to an endpoint; do not pull a middle-of-track pick several metres.
+      local close=distance<=0.25^2
       if close and distance<best then u,best=endpoint,distance end
     end
   end

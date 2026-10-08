@@ -83,12 +83,16 @@ entities[10].objects={}
 revision=2;assert(not pcall(proposal.make,a,b,{extension=0,elevation=0,direction=1}));revision=1
 assert(not pcall(proposal.make,a,a,{extension=0,elevation=0,direction=1}))
 
--- Screen-space snapping is bounded in world space and honours its toggle.
-local nearStart=proposal.pick(10,nil,{x=0,y=7},true)
+-- Centreline picks stay under the cursor; only near-exact node hits snap.
+local nearStart=proposal.pick(10,nil,{x=0,y=.1},true)
 assert(nearStart.u==0 and nearStart.snapped)
 local unsnapped=proposal.resnap(nearStart,false)
-assert(math.abs(unsnapped.p[2]-7)<.001 and not unsnapped.snapped)
-assert(proposal.pick(10,nil,{x=0,y=993},true).u==1)
+assert(math.abs(unsnapped.p[2]-.1)<.001 and not unsnapped.snapped)
+assert(proposal.pick(10,nil,{x=0,y=999.9},true).u==1)
+assert(math.abs(proposal.pick(10,nil,{x=0,y=7},true).p[2]-7)<.001)
+assert(math.abs(proposal.pick(10,nil,{x=0,y=993},true).p[2]-993)<.001)
+local middle=proposal.pick(10,nil,{x=.9,y=500},true)
+assert(middle.p[1]==0 and math.abs(middle.p[2]-500)<.001)
 assert(proposal.pick(10,nil,{x=0,y=20},true).u>0)
 assert(proposal.pick(10,nil,{x=0,y=0},false).u==0)
 assert(proposal.pick(10,nil,{x=0,y=1000},false).u==1)
@@ -164,7 +168,23 @@ builtin.type.ControlPointInfo={State={Invalid="Invalid",Hover="Hover",Idle="Idle
   new=function(position,offsetZ,radius,state) return {position=position,offsetZ=offsetZ,radius=radius,state=state} end}
 for _,name in ipairs({"Selector","ProposalViewer","ActionDescriptor","ActionTooltip","LayerConfig","EdgeRenderable"}) do
   builtin[name]=function(p)
-    if name=="ActionDescriptor" then assert(scope=="ActionFn","Native descriptor must be a direct ActionFn child") end
+    if name=="ActionDescriptor" then
+      assert(scope=="ActionFn","Native descriptor must be a direct ActionFn child")
+      assert(#p.highlightedEntities==0,"Point selection must not highlight entire rail segments")
+      local counts={}
+      local function collect(node)
+        if node.recipeName=="ProposalViewer" or node.recipeName=="EdgeRenderable" then
+          counts[node.recipeName]=(counts[node.recipeName] or 0)+1
+          assert(counts[node.recipeName]<=1,"Must not specify more than 1 "..node.recipeName)
+        end
+        for _,child in ipairs(node.children or {}) do collect(child) end
+      end
+      collect(p)
+    end
+    if name=="Selector" then
+      assert(p.selectionColor[4]==0 and p.selectionOutlineColor[4]==0 and p.selectionOutlineColor1[4]==0,
+        "Hovering a pick point must not highlight the rail entity")
+    end
     if name=="EdgeRenderable" then
       assert(#p.edges>0 and p.ignoreDepth)
       for _,e in ipairs(p.edges) do assert(#e.colors==2 and e.width>0 and e.stepSize>0) end
@@ -256,7 +276,35 @@ local function find(action,name)
 end
 local function markers(action)
   local result={}
+  local batch=find(action,"EdgeRenderable")
+  local ring={}
+  for _,edge in ipairs(batch and batch.edges or {}) do
+    if edge.width==0.65 then
+      ring[#ring+1]=edge.geometry
+      if #ring==4 then
+        local x,y,z=0,0,0
+        for _,shape in ipairs(ring) do
+          local p=shape.cubicSpline.pos[1]
+          x=x+p.x;y=y+p.y;z=z+shape.height.x
+        end
+        result[#result+1]={position=v3(x/4,y/4,z/4),state="Idle"}
+        ring={}
+      end
+    end
+  end
+  assert(#ring==0,"Fixed point marks must be complete rings")
   for _,c in ipairs(action.children) do if c.controlPointInfo then result[#result+1]=c.controlPointInfo end end
+  return result
+end
+local function lockedCount(action)
+  local count=0
+  for _,point in ipairs(markers(action)) do if point.state=="Idle" then count=count+1 end end
+  return count
+end
+local function railEdges(action)
+  local result={}
+  local batch=find(action,"EdgeRenderable")
+  for _,edge in ipairs(batch and batch.edges or {}) do if edge.width==1 then result[#result+1]=edge end end
   return result
 end
 local function input(key) return instances.tool.actions[key] end
@@ -283,18 +331,25 @@ for _=1,3 do stepAll();assert(bound==nil) end
 toolbar.changeParam(1,3);stepAll();assert(bound)
 -- Hover markers, endpoint snapping, and toggling snapping without moving.
 action=render();local selector=find(action,"Selector")
-selector.onProcessMouseEvent({x=0,y=7,type="Moved"});selector.onHover(10)
+selector.onProcessMouseEvent({x=0,y=.1,type="Moved"});selector.onHover(10)
 action=render();assert(#markers(action)==1 and markers(action)[1].position.y==0)
 assert(markers(action)[1].state=="Hover" and enabled("IA_APPLY"))
 options.disableSnapping=2;stepAll();action=render()
-assert(math.abs(markers(action)[1].position.y-7)<.001)
+assert(math.abs(markers(action)[1].position.y-.1)<.001)
 input("IA_APPLY").fn();action=render()
 assert(#markers(action)==1 and markers(action)[1].state=="Idle")
 local firstY=markers(action)[1].position.y
+-- Native hover fires again immediately after fixing the first point. This
+-- must remain a single ProposalViewer, including an invalid same-rail hover.
+find(action,"Selector").onHover(10);action=render()
+assert(#markers(action)==2 and lockedCount(action)==1)
+local repeatSize=#find(action,"EdgeRenderable").edges
+for _=1,5 do action=render();assert(#find(action,"EdgeRenderable").edges==repeatSize) end
+find(action,"Selector").onHover(nil);action=render()
 options.disableSnapping=1;stepAll();action=render()
 assert(markers(action)[1].position.y==firstY,"Locked points must not move with snapping settings")
 action=render();input("IA_ABORT").fn()
-action=render();assert(options.mode==3 and #action.highlightedEntities==0 and #markers(action)==0)
+action=render();assert(options.mode==3 and lockedCount(action)==0 and #markers(action)==0)
 
 -- The second native hit previews the loop before clicking, even when its
 -- transport-network parameter differs from the BASE_EDGE parameter.
@@ -307,7 +362,7 @@ assert(hovering and find(action,"EdgeRenderable") and #markers(action)==2)
 assert(math.abs(markers(action)[2].position.y-350)<.001)
 checked(hovering,false);action=render();assert(enabled("IA_APPLY") and built==nil)
 input("IA_APPLY").fn();action=render()
-assert(#action.highlightedEntities==2 and built==nil and not enabled("IA_APPLY"),"Fixing the second point must not build")
+assert(lockedCount(action)==2 and built==nil and not enabled("IA_APPLY"),"Fixing the second point must not build")
 checked(hovering,false,{},1);action=render();assert(not enabled("IA_APPLY"))
 input("IA_ABORT").fn();action=render();assert(#markers(action)==1)
 input("IA_ABORT").fn();action=render();assert(#markers(action)==0)
@@ -321,11 +376,14 @@ assert(table.concat(logs,"\n"):find("Rail outline verified:",1,true))
 local left,right=outline.edges[1].geometry,outline.edges[2].geometry
 assert(math.abs(left.cubicSpline.pos[1].x-right.cubicSpline.pos[1].x-1.5)<1e-6)
 assert(math.abs(left.cubicSpline.pos[1].y-350)<.001 and left.height.x==0)
-for i=1,#outline.edges-2 do
-  local ending=outline.edges[i].geometry.cubicSpline.pos[2]
-  local starting=outline.edges[i+2].geometry.cubicSpline.pos[1]
+local rails=railEdges(action)
+for i=1,#rails-2 do
+  local ending=rails[i].geometry.cubicSpline.pos[2]
+  local starting=rails[i+2].geometry.cubicSpline.pos[1]
   assert((ending.x-starting.x)^2+(ending.y-starting.y)^2<1e-10,"Rail outlines must remain continuous")
 end
+local batchSize=#outline.edges
+for _=1,5 do action=render();assert(#find(action,"EdgeRenderable").edges==batchSize) end
 assert(preview.simpleProposal.streetProposal.edgesToAdd[5].comp.roadTemplate=="selected_track")
 checked(preview,true,{"无法建造"},0)
 action=render();assert(not enabled("IA_APPLY"))
@@ -398,7 +456,7 @@ assert(not enabled("IA_APPLY") and find(action,"ActionTooltip").param.cost==nil)
 selector=find(action,"Selector");selector.onProcessMouseEvent({x=5,y=350});selector.onHover(20)
 action=render();old=find(action,"ProposalViewer")
 revisions[20]=2;stepAll();checked(old,false)
-action=render();assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"ProposalViewer"))
+action=render();assert(#markers(action)==1 and lockedCount(action)==1 and not find(action,"ProposalViewer"))
 revisions[20]=nil
 
 -- Invalid second points still have a visible marker and red outline, but
@@ -411,7 +469,7 @@ selector=find(action,"Selector");selector.onProcessMouseEvent({x=5,y=350});selec
 action=render();assert(not find(action,"ProposalViewer"))
 assert(markers(action)[2].state=="Invalid" and not enabled("IA_APPLY"))
 assert(find(action,"EdgeRenderable") and find(action,"EdgeRenderable").edges[1].colors[1][1]==1)
-find(action,"Selector").onSelect(20);action=render();assert(#action.highlightedEntities==1)
+find(action,"Selector").onSelect(20);action=render();assert(lockedCount(action)==1)
 assert(find(action,"ActionTooltip").param.message.message:find("信号或路标",1,true))
 action.onBack();entities[20].objects={}
 action=render();assert(not find(action,"EdgeRenderable"))
@@ -430,13 +488,13 @@ for _,cancel in ipairs(cancelCases) do
   terrainPosition={x=0,y=750};find(action,"Selector").onProcessMouseEvent({x=0,y=350,type="Moved"})
   cancel(action);terrainPosition=nil;checked(old,false)
   for _=1,4 do stepAll() end
-  action=render();assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"EdgeRenderable"))
+  action=render();assert(#markers(action)==1 and lockedCount(action)==1 and not find(action,"EdgeRenderable"))
   assert(math.abs(markers(action)[1].position.y-350)<.001)
-  cancel(action);action=render();assert(#markers(action)==0 and #action.highlightedEntities==0 and options.mode==3)
+  cancel(action);action=render();assert(#markers(action)==0 and lockedCount(action)==0 and options.mode==3)
 end
 
 action=twoPoints();revisions[20]=2;stepAll();action=render()
-assert(#markers(action)==1 and #action.highlightedEntities==1 and not find(action,"ProposalViewer"))
+assert(#markers(action)==1 and lockedCount(action)==1 and not find(action,"ProposalViewer"))
 revisions[20]=nil;action.onBack();action=render();assert(#markers(action)==0)
 
 -- Three Escapes from two points exit; late callbacks remain dead.
@@ -455,7 +513,7 @@ for _=1,3 do stepAll();assert(bound==nil) end
 toolbar.changeParam(1,3);stepAll()
 action=render();selector=find(action,"Selector")
 selector.onProcessMouseEvent({x=0,y=350});selector.onSelect(10)
-revisions[10]=2;stepAll();action=render();assert(#markers(action)==0 and #action.highlightedEntities==0)
+revisions[10]=2;stepAll();action=render();assert(#markers(action)==0 and lockedCount(action)==0)
 revisions[10]=nil
 action=twoPoints();checked(find(action,"ProposalViewer"),false)
 action=render();local complete
