@@ -44,9 +44,9 @@ class NativeStationRowsTests(unittest.TestCase):
                 RegisterPluginRecipe = function(extension, name, render) return render end,
                 onMount = function(callback) callback() end,
                 onEvent = function(name, callback) reactEvents[name] = callback end,
-                onStep = function(callback) guiStep = callback end,
+                onStep = function() error('Station rows must use input events, not frame polling') end,
                 useInputAction = function(name, handler) inputActions[name] = handler end,
-                iaHandler = function(callback)
+                iaHandlerExtended = function(callback)
                     return {callback = callback}
                 end,
             }
@@ -58,7 +58,10 @@ class NativeStationRowsTests(unittest.TestCase):
                 type = {ComponentType = {CONSTRUCTION = 'CONSTRUCTION'},
                     Context = {new = function() return {} end}},
                 engine = {
-                    entityExists = function(entity) return components[entity] ~= nil end,
+                    entityExists = function(entity)
+                        assert(type(entity) == 'number', 'Entity APIs require an ID, not a revision pair')
+                        return components[entity] ~= nil
+                    end,
                     getComponent = function(entity, kind)
                         return copy(components[entity] and components[entity][kind])
                     end,
@@ -73,7 +76,9 @@ class NativeStationRowsTests(unittest.TestCase):
                     },
                 },
                 gui = {
-                    inputAction = {modifierOnlyActionIsActive = function(name)
+                    inputAction = {InvokeData = {Status = {
+                        Triggered = 'Triggered', EndReleased = 'EndReleased', EndAborted = 'EndAborted',
+                    }}, modifierOnlyActionIsActive = function(name)
                         assert(name == 'IA_PRECISION_MODE')
                         return shift
                     end},
@@ -129,6 +134,10 @@ class NativeStationRowsTests(unittest.TestCase):
                 ['::/gui/main/react.lua'] = react,
                 ['::/gui/main/mod_entry_point.tl'] = {ModEntryPointExtension = 'extension'},
                 ['::/scripts/table_util.tl'] = {copy = copy},
+                ['::/scripts/entity_util.tl'] = {entityChanged = function(value)
+                    return not api.engine.entityExists(value.entity)
+                        or value.revision.num[1] < (components[value.entity].revision or 1)
+                end},
             }
             function ug_require(name)
                 assert(modules[name], 'unexpected module ' .. name)
@@ -154,9 +163,13 @@ class NativeStationRowsTests(unittest.TestCase):
             function renderNative() node = builtin.ConstructionAction(uiParams) end
             function press()
                 shift = true
-                inputActions.IA_PRECISION_MODE.callback()
+                inputActions.IA_PRECISION_MODE.callback({status = 'Triggered'})
             end
-            function release() shift = false; guiStep() end
+            function release()
+                shift = false
+                inputActions.IA_PRECISION_MODE.callback({status = 'EndReleased'})
+            end
+            function guiStep() end
             function nativeEdit(changes)
                 local params = copy(components[currentEntity].CONSTRUCTION.params)
                 for id, name in pairs(changes) do params.modules[id] = name and module(name) or nil end
@@ -193,8 +206,12 @@ class NativeStationRowsTests(unittest.TestCase):
                     handlers.handleEvent(nil, engineState, nil, 'apply_command', 'onPostBuildProposal',
                         {command.proposal, data, ids, command.playerInitiated})
                     if queued.callback then
+                        local revisions = {}
+                        for _, entity in ipairs(ids) do
+                            revisions[#revisions + 1] = {entity, {num = {components[entity].revision or 1, 0, 0}}}
+                        end
                         guiCallbacks[#guiCallbacks + 1] = {callback = queued.callback, success = success,
-                            result = {resultEntities = ids, proposal = {proposal = command.proposal}}}
+                            result = {resultEntities = revisions, proposal = {proposal = command.proposal}}}
                     end
                 end
                 lane = 'gui'
@@ -365,6 +382,78 @@ class NativeStationRowsTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("currentEntity"), 12)
         self.assertEqual(self.lua.eval("components[12].CONSTRUCTION.params.modules[6397990].name"), "cargo.module")
         self.assertEqual(self.lua.eval("#warnings"), 1)
+
+    def test_changed_result_revision_stops_before_editing_again(self):
+        self.start_native_addition()
+        self.lua.execute("executeNext(); components[currentEntity].revision = 2; runCallbacks(); flushScripts()")
+        self.assertFalse(self.lua.eval("sequence.running()"))
+        self.assertFalse(self.lua.eval("engineState.value.busy"))
+        self.assertEqual(self.lua.eval("#commands"), 1)
+        self.assertEqual(self.lua.eval("#refunded.entities"), 0)
+        self.assertEqual(self.lua.eval("#warnings"), 1)
+
+    def test_command_preparation_and_callback_errors_release_the_queue(self):
+        for failing_api in (
+            "api.type.Context.new",
+            "api.gui.construction.getRefundableEntities",
+            "api.gui.construction.updateRefundableEntities",
+        ):
+            with self.subTest(failing_api=failing_api):
+                self.setUp()
+                self.lua.execute(f"{failing_api} = function() error('unavailable native API') end")
+                self.start_native_addition()
+                if failing_api.endswith("updateRefundableEntities"):
+                    self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
+                self.assertFalse(self.lua.eval("sequence.running()"))
+                self.assertFalse(self.lua.eval("engineState.value.busy"))
+                self.assertEqual(self.lua.eval("#warnings"), 1)
+                self.assertEqual(self.lua.eval("#commandQueue"), 0)
+
+    def test_aborted_modifier_and_tool_changes_clear_the_snapshot_without_polling(self):
+        self.lua.execute("press(); flushScripts()")
+        self.assertEqual(self.lua.eval("engineState.value.target.entity"), 10)
+        self.lua.execute("inputActions.IA_PRECISION_MODE.callback({status = 'EndAborted'}); flushScripts()")
+        self.assertIsNone(self.lua.eval("engineState.value.target"))
+        self.lua.execute("press(); flushScripts(); uiParams = {}; renderNative(); flushScripts()")
+        self.assertIsNone(self.lua.eval("engineState.value.target"))
+        self.lua.execute("""
+            uiParams = {moduleBulldozer = {constructionEntity = 10}}
+            renderNative(); flushScripts()
+        """)
+        self.assertEqual(self.lua.eval("engineState.value.target.entity"), 10)
+        self.assertIsNone(self.lua.eval("engineState.value.target.module"))
+
+    def test_held_modifier_rearms_after_completion_without_another_key_event(self):
+        self.lua.execute("""
+            press(); nativeEdit({[6398000] = 'cargo.module'})
+            executeNext(); executeNext(); runCallbacks(); claim(); flushScripts()
+        """)
+        for _ in range(3):
+            self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
+        self.assertFalse(self.lua.eval("sequence.running()"))
+        self.assertEqual(self.lua.eval("engineState.value.target.entity"), 14)
+        self.assertEqual(self.lua.eval("engineState.value.target.module"), "cargo.module")
+        self.lua.execute("""
+            for j = -2, 1 do
+                local slots = components[14].CONSTRUCTION.slots
+                slots[#slots + 1] = {id = 6396000 + 10 * j, type = 'cargo_platform'}
+            end
+            nativeEdit({[6396000] = 'cargo.module'})
+            executeNext(); runCallbacks(); claim(); flushScripts()
+        """)
+        self.assertEqual(self.lua.eval("#commands"), 4)
+        self.assertEqual(self.lua.eval("engineState.value.job.id"), 2)
+
+    def test_new_gui_mount_clears_saved_pending_work(self):
+        self.lua.execute("""
+            engineState.value.busy = true
+            engineState.value.job = {id = 12, entity = 10, steps = {{slotId = 6398000}}}
+            engineState.value.target = {entity = 10}
+            data().entry(); flushScripts(); claim()
+        """)
+        self.assertIsNone(self.lua.eval("engineState.value.job"))
+        self.assertFalse(self.lua.eval("engineState.value.busy"))
+        self.assertEqual(self.lua.eval("#commands"), 0)
 
     def test_native_dependency_deletion_continues_attachments_before_platforms(self):
         self.lua.execute("""

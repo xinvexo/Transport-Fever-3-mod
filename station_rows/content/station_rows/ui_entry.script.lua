@@ -40,10 +40,18 @@ builtin.ConstructionAction = function(params)
         target = { entity = builder.constructionEntity,
           module = params.moduleBuilder and builder.moduleResName or nil }
         -- The key event queues the snapshot before the following native mouse command.
-        react.useInputAction("IA_PRECISION_MODE", react.iaHandler(function() syncTarget(true) end))
+        react.useInputAction("IA_PRECISION_MODE", react.iaHandlerExtended(function(data)
+          local status = api.gui.inputAction.InvokeData.Status
+          if data.status == status.Triggered then
+            syncTarget(true)
+          elseif data.status == status.EndReleased or data.status == status.EndAborted then
+            syncTarget(false)
+          end
+        end))
       end
     end
   end
+  syncTarget(api.gui.inputAction.modifierOnlyActionIsActive("IA_PRECISION_MODE"))
   return nativeAction(params)
 end
 
@@ -72,14 +80,12 @@ local entry = react.RegisterPluginRecipe(
     react.onEvent("xinStationRowsFinished", function()
       busy = false
       sent = nil
-    end)
-    react.onStep(function()
       syncTarget(api.gui.inputAction.modifierOnlyActionIsActive("IA_PRECISION_MODE"))
     end)
     return nil
   end
 )
-log.message("[Station Rows] Native module controls loaded (revision 16).")
+log.message("[Station Rows] Native module controls loaded (revision 17).")
 
 function data()
   return { entry = entry }

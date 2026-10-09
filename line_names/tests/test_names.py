@@ -342,7 +342,14 @@ class NamingTests(unittest.TestCase):
             end
         """)
         self.assertEqual(self.result(10), "北京 - 公交02")
+        scans = self.g.scans.LINE
         self.assertEqual(self.result(20), "北京 - 公交01")
+        for _ in range(50):
+            self.result(10)
+        self.assertEqual(self.g.scans.LINE, scans)
+        self.g.advance()
+        self.result(10)
+        self.assertEqual(self.g.scans.LINE, scans + 1)
         self.assertEqual(len(self.g.warnings), 1)
 
     def test_plan_is_reused_in_one_tick_but_refreshes_when_paused(self):
@@ -368,6 +375,9 @@ class NamingTests(unittest.TestCase):
 
     def test_freight_uses_native_town_map_without_enumerating_building_components(self):
         self.lua.execute("""
+            api.engine.system.townBuildingSystem.getPersonCapacity2townBuildingMap = function()
+                error('Freight previews do not need the passenger building map')
+            end
             local native = api.engine.getEntitiesWithComponent
             api.engine.getEntitiesWithComponent = function(kind)
                 assert(kind ~= 'TOWN_BUILDING', 'Use town building system map')
@@ -389,6 +399,7 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(self.result(), "保留我的名字")
         self.assertEqual(len(self.g.warnings), 1)
         self.g.failCatchment = False
+        self.g.advance()
         self.assertEqual(self.result(), "北京 - 公交01")
 
     def test_custom_industry_names_and_pattern_characters_are_preserved(self):

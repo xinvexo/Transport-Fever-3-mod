@@ -26,7 +26,8 @@ local function complete(stops, entity, initialize)
         and api.engine.entityExists(groupId) then
         local group = api.engine.getComponent(groupId, api.type.ComponentType.STATION_GROUP)
         local stationId = group and group.stations[old.station + 1]
-        local station = stationId and api.engine.getComponent(stationId, api.type.ComponentType.STATION)
+        local station = stationId and api.engine.entityExists(stationId)
+          and api.engine.getComponent(stationId, api.type.ComponentType.STATION)
         local terminal = station and station.terminals[old.terminal + 1]
         if terminal and terminal.tag ~= nil then
           choices[index][stationId] = { [terminal.tag] = true }

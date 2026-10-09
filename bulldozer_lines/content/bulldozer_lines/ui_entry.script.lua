@@ -8,9 +8,18 @@ local lines = ug_require "xin_bulldozer_lines_1::/bulldozer_lines/lines.lua"
 local construction = ug_require "::/gui/construction/construction_react_util.tl"
 local buildingColors = ug_require "xin_bulldozer_lines_1::/bulldozer_lines/building_colors.lua"
 
+local buildingColorsFailed = false
 local nativeGetActionParams = construction.getActionParams
 construction.getActionParams = function(definition, ...)
-  return buildingColors.apply(definition, nativeGetActionParams(definition, ...))
+  local original = nativeGetActionParams(definition, ...)
+  if buildingColorsFailed or not definition or definition.action ~= "ACTION_BULLDOZER" then return original end
+  local ok, result = pcall(buildingColors.apply, definition, original)
+  if ok then return result end
+  -- This hook is shared by every construction tool. A failed visual enhancement
+  -- must leave the native action usable and must not fail again every render.
+  buildingColorsFailed = true
+  log.message("[Bulldozer Lines] Building colors disabled until reload: " .. tostring(result))
+  return original
 end
 
 local currentSession
@@ -278,8 +287,9 @@ local entry = react.RegisterPluginRecipe(
     -- Retain the existing native snapshot timer for camera-dependent filters,
     -- but do no line-system work at all while the bulldozer is inactive.
     local all = engine.useStepStateTimer(function(previous)
-      return session.active and not session.closed and lines.read(filters:old(), previous) or {}
-    end, 0.5)
+      if session.active and not session.closed then return lines.read(filters:old(), previous) end
+      return previous and #previous == 0 and previous or {}
+    end, 0.5, function(a, b) return a == b end)
     session.selected, session.lines, session.filters = selected, all, filters
     currentSession = session
 

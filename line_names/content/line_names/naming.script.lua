@@ -11,7 +11,7 @@ local function warn(message)
 end
 
 local function makePlan()
-  local context, lines, healthy = world.new(), {}, true
+  local context, lines = world.new(), {}
   for _, id in ipairs(api.engine.system.lineSystem.getLinesForPlayer(api.engine.util.getPlayer())) do
     local ok, record = pcall(function()
       local value = context.line(id)
@@ -22,10 +22,10 @@ local function makePlan()
       lines[#lines + 1] = record
     elseif api.engine.entityExists(id) then
       lines[#lines + 1] = { id = id, name = api.engine.util.getEntityName(id) }
-      if not ok then healthy = false; warn(record) end
+      if not ok then warn(record) end
     end
   end
-  return names.plan(lines), healthy
+  return names.plan(lines)
 end
 
 local function rename(params)
@@ -35,10 +35,11 @@ local function rename(params)
   local session, player = globals.getDefaultWindowApi(), api.engine.util.getPlayer()
   -- The native dialog calls the component once per selected line. Reuse only
   -- within one simulation tick and GUI session; paused games still tick.
-  if not cached or not cached.healthy or not session or not tick or cached.session ~= session
+  -- Keep partial fallback plans for that same tick too: one broken line must
+  -- not repeat the full-player scan for every selected line in the dialog.
+  if not cached or not session or not tick or cached.session ~= session
     or cached.tick ~= tick or cached.player ~= player then
-    local plan, healthy = makePlan()
-    cached = { session = session, tick = tick, player = player, plan = plan, healthy = healthy }
+    cached = { session = session, tick = tick, player = player, plan = makePlan() }
   end
   return cached.plan[params.lineEntity] or api.engine.util.getEntityName(params.lineEntity)
 end

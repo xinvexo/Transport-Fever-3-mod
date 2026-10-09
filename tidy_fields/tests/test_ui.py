@@ -28,8 +28,11 @@ class TidyFieldsUiTests(unittest.TestCase):
                         states[stateIndex] = {
                             value = initial,
                             old = function(self) return self.value end,
-                            set = function(self, value) self.value = value end,
-                            hasExpired = function() return false end,
+                            set = function(self, value)
+                                assert(not expired, 'Cannot write expired React state')
+                                self.value = value
+                            end,
+                            hasExpired = function() return expired == true end,
                         }
                     end
                     return states[stateIndex]
@@ -206,6 +209,34 @@ class TidyFieldsUiTests(unittest.TestCase):
                 self.element("Button").onClick()
                 self.assertEqual(self.lua.eval("#commands"), 2)
                 self.assertEqual(self.lua.eval("commands[#commands].candidate.mode"), "back")
+
+    def test_command_creation_and_submission_errors_allow_retry(self):
+        for failing_api in ("makeWorldBuildProposalCmd", "sendCommand"):
+            with self.subTest(failing_api=failing_api):
+                self.setUp()
+                self.render()
+                self.lua.execute(f"""
+                    originalCommandFunction = api.cmd.{failing_api}
+                    api.cmd.{failing_api} = function() error('native command unavailable') end
+                """)
+                self.element("Button").onClick()
+                self.render()
+                self.assertTrue(self.element("Button").meta.enabled)
+                self.assertEqual(self.lua.eval("#commands"), 0)
+                self.assertEqual(self.element("TextView", "industryWindow.tidyFields.result").text,
+                                 self.translations["zh_CN"]["Could not prepare a plot layout."])
+                self.lua.execute(f"api.cmd.{failing_api} = originalCommandFunction")
+                self.element("Button").onClick()
+                self.assertEqual(self.lua.eval("#commands"), 1)
+
+    def test_result_after_industry_window_closes_does_not_access_expired_state(self):
+        self.render()
+        self.element("Button").onClick()
+        self.lua.execute("""
+            expired = true
+            proposals.describeFailure = function() error('Closed window should ignore the result') end
+            pendingCallback({}, false)
+        """)
 
 
 if __name__ == "__main__":

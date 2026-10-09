@@ -71,11 +71,13 @@ local function remapPending(pending, replacements)
 end
 
 local function queueLines(groups, pending)
+  local player = api.engine.util.getPlayer()
   for group, stations in pairs(groups) do
-    for _, entry in ipairs(api.engine.system.lineSystem.getLineStops(group)) do
-      local entity = entry[1]
+    -- Native station statistics use this line-level query; getLineStops repeats
+    -- a line for every visit to the group and does unnecessary duplicate work.
+    for _, entity in ipairs(api.engine.system.lineSystem.getLinesForStationGroup(group)) do
       local owner = component(entity, "PLAYER_OWNED")
-      if owner and owner.player == api.engine.util.getPlayer() then
+      if owner and owner.player == player then
         pending[entity] = pending[entity] or {}
         for station, terminals in pairs(stations) do
           merge(pending[entity], group, station, terminals)

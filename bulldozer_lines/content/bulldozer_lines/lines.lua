@@ -26,6 +26,7 @@ function lines.read(filters, previous)
   local result, oldById, byId = { filterKey = filterKey }, {}, {}
   for _, line in ipairs(previous or {}) do oldById[line.entity] = line end
   local orderChanged = false
+  local changed = not previous or previous.filterKey ~= filterKey
   for _, entity in ipairs(api.engine.system.lineSystem.getLinesForPlayer(api.engine.util.getPlayer())) do
     if api.engine.entityExists(entity) then
       local old = oldById[entity]
@@ -36,10 +37,14 @@ function lines.read(filters, previous)
       local line = old
       if not old or old.name ~= name or old.visible ~= visible or old.matchesTransport ~= matches then
         line = { entity = entity, name = name, visible = visible, matchesTransport = matches }
+        changed = true
       end
       result[#result + 1], byId[entity] = line, line
     end
   end
+  -- Preserve snapshot identity when engine enumeration order is the only
+  -- difference. The native timer can then compare states without deep scans.
+  if not changed and #previous == #result then return previous end
   -- Camera/transport changes do not change name order. Reuse it even
   -- when the line system enumerates entities in a different order.
   if previous and not orderChanged and #previous == #result then

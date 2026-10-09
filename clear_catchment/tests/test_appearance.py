@@ -166,12 +166,17 @@ class OverlayTests(unittest.TestCase):
           assert(appearance.mergeLayer(enhanced,nil)==nil)
         """)
 
-    def test_hooks_forward_entity_and_do_not_leak_overlay_to_later_actions(self):
+    def install_hooks(self):
         self.lua.execute("""
           calls=0
           construction={getActionParams=function(...)
-            calls=calls+1;arguments=table.pack(...);return original
-          end,mergeLayerConfig=function(fromConstruction,preferred) return preferred or fromConstruction end}
+            calls=calls+1;arguments=table.pack(...)
+            if nativeActionFailure then error(nativeActionFailure) end
+            return original
+          end,mergeLayerConfig=function(fromConstruction,preferred)
+            if nativeMergeFailure then error(nativeMergeFailure) end
+            return preferred or fromConstruction
+          end}
           function ug_require(path)
             if path:find('construction_react_util',1,true) then return construction end
             if path:find('appearance.lua',1,true) then return appearance end
@@ -187,6 +192,9 @@ class OverlayTests(unittest.TestCase):
           log={message=function(message) messages[#messages+1]=message end}
         """)
         self.lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
+
+    def test_hooks_forward_entity_and_do_not_leak_overlay_to_later_actions(self):
+        self.install_hooks()
         self.lua.execute("""
           assert(data().entry()==nil)
           local result=construction.getActionParams(module,'params','repo',false,nil,31,'callback','sublist')
@@ -204,6 +212,76 @@ class OverlayTests(unittest.TestCase):
           assert(construction.mergeLayerConfig(road.layerConfig,preferred)==preferred)
           assert(not preferred.catchmentAreaRenderableConfig.isVisible)
           assert(construction.getActionParams(module,'params','repo',false,nil,32)==original)
+        """)
+
+    def test_overlay_failure_keeps_native_action_and_stops_repeated_failures(self):
+        self.install_hooks()
+        self.lua.execute("""
+          local apply=appearance.apply
+          local attempts=0
+          appearance.apply=function(...)
+            attempts=attempts+1;error('incompatible overlay data')
+          end
+          local count=#messages
+          for i=1,10 do assert(construction.getActionParams(station)==original) end
+          assert(attempts==1 and #messages==count+1 and calls==10)
+          assert(not original.layerConfig.catchmentAreaRenderableConfig.isVisible)
+          appearance.apply=apply
+          assert(construction.getActionParams(stop)==original, 'Recovery requires a reload')
+          assert(construction.mergeLayerConfig(original.layerConfig,nil)==original.layerConfig)
+        """)
+
+    def test_partial_overlay_failure_cannot_modify_native_colors(self):
+        self.install_hooks()
+        self.lua.execute("""
+          local calls=0
+          local new=api.type.Vec3f.new
+          api.type.Vec3f.new=function(...)
+            calls=calls+1
+            if calls==3 then error('color conversion failed') end
+            return new(...)
+          end
+          assert(construction.getActionParams(station)==original)
+          assert(calls==3)
+          local config=original.layerConfig.catchmentAreaRenderableConfig
+          assert(not config.isVisible and config.entity==31 and config.carriers[1]==2)
+          assert(config.displaySettings.personBaseColor.x==0.1)
+          assert(config.displaySettings.cargoBaseColor.y==0.5)
+          assert(config.displaySettings.innerAlpha==0.1)
+          assert(construction.getActionParams(station)==original and calls==3)
+        """)
+
+    def test_merge_failure_preserves_preferred_layer_and_stops_enhancement(self):
+        self.install_hooks()
+        self.lua.execute("""
+          local enhanced=construction.getActionParams(station)
+          local preferred=copy(original.layerConfig)
+          preferred.colorMap={other=true}
+          local attempts=0
+          appearance.mergeLayer=function()
+            attempts=attempts+1;error('incompatible preferred layer')
+          end
+          local count=#messages
+          for i=1,10 do assert(construction.mergeLayerConfig(enhanced.layerConfig,preferred)==preferred) end
+          assert(attempts==1 and #messages==count+1)
+          assert(preferred.colorMap.other and not preferred.catchmentAreaRenderableConfig.isVisible)
+          assert(construction.getActionParams(station)==original)
+        """)
+
+    def test_native_hook_errors_are_not_mistaken_for_overlay_errors(self):
+        self.install_hooks()
+        self.lua.execute("""
+          nativeActionFailure='native action failure'
+          local ok,failure=pcall(construction.getActionParams,station)
+          assert(not ok and tostring(failure):find(nativeActionFailure,1,true))
+          nativeActionFailure=nil
+          local enhanced=construction.getActionParams(station)
+          assert(enhanced~=original)
+          nativeMergeFailure='native merge failure'
+          ok,failure=pcall(construction.mergeLayerConfig,enhanced.layerConfig,nil)
+          assert(not ok and tostring(failure):find(nativeMergeFailure,1,true))
+          nativeMergeFailure=nil
+          assert(construction.getActionParams(station)~=original)
         """)
 
 

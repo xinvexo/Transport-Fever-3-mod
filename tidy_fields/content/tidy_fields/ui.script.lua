@@ -82,12 +82,20 @@ ui.TidyFieldsPlugin = react.RegisterPluginRecipe(
         status:set({ busy = false, message = reason })
         return
       end
-      api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(candidate, context, false, true), function(command, success)
-        local message = success and _("Plots tidied.") or proposals.describeFailure(command and command.resultProposalData)
-        if not success then log.warning("[Tidy Fields] Build failed: " .. message) end
-        if status:hasExpired() then return end
-        status:set({ busy = false, message = message })
+      local submitted, failure = pcall(function()
+        api.cmd.sendCommand(api.cmd.makeWorldBuildProposalCmd(candidate, context, false, true), function(command, success)
+          if status:hasExpired() then return end
+          local message = success and _("Plots tidied.") or proposals.describeFailure(command and command.resultProposalData)
+          if not success then log.warning("[Tidy Fields] Build failed: " .. message) end
+          status:set({ busy = false, message = message })
+        end)
       end)
+      if not submitted then
+        log.warning("[Tidy Fields] Could not submit layout: " .. tostring(failure))
+        if not status:hasExpired() then
+          status:set({ busy = false, message = _("Could not prepare a plot layout.") })
+        end
+      end
     end
 
     local controls = {}

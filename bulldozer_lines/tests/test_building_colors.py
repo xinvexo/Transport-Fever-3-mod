@@ -95,7 +95,7 @@ class BuildingColorTests(unittest.TestCase):
           assert(colors.apply({action='ACTION_BULLDOZER'},noLayer)==noLayer)
         ''')
 
-    def test_entry_chains_existing_layer_hook_and_forwards_arguments(self):
+    def install_hook(self):
         self.lua.execute('''
           calls=0
           construction={getActionParams=function(...)
@@ -118,10 +118,32 @@ class BuildingColorTests(unittest.TestCase):
           log={message=function() end}
         ''')
         self.lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
+
+    def test_entry_chains_existing_layer_hook_and_forwards_arguments(self):
+        self.install_hook()
         self.lua.execute('''
           local result=construction.getActionParams({action='ACTION_BULLDOZER'},'params','repo',false,nil,nil,'callback','sublist')
           assert(calls==1 and result.layerConfig.colorPassFn.townBuildingPainter)
           assert(result.constructionActionParams==original.constructionActionParams)
+        ''')
+
+    def test_partial_color_failure_cannot_modify_native_layer(self):
+        self.install_hook()
+        self.lua.execute('''
+          original.layerConfig.colorPassFn={fallbackColor={underground=true},transportNetworkPainter={keep=true}}
+          local attempts=0
+          api.type.LayerConfig.BuildingRenderableConfig.new=function()
+            attempts=attempts+1;error('building config copy failed')
+          end
+          for i=1,3 do
+            local result=construction.getActionParams({action='ACTION_BULLDOZER'},'params','repo',false,nil,nil,'callback','sublist')
+            assert(result==original)
+          end
+          assert(attempts==1)
+          local layer=original.layerConfig
+          assert(layer.colorPassFn.fallbackColor.underground and layer.colorPassFn.transportNetworkPainter.keep)
+          assert(layer.colorPassFn.townBuildingPainter==nil)
+          assert(not layer.buildingRenderableConfig.isVisible and layer.buildingRenderableConfig.includeStations)
         ''')
 
 

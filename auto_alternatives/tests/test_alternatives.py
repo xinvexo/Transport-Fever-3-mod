@@ -78,20 +78,22 @@ class AlternativesTests(unittest.TestCase):
                 engine = {
                     entityExists = function(entity) return components[entity] ~= nil end,
                     getComponent = function(entity, kind)
-                        return copy(components[entity] and components[entity][kind])
+                        assert(components[entity], 'getComponent requires an existing entity')
+                        return copy(components[entity][kind])
                     end,
                     util = {getPlayer = function() return 7 end},
                     system = {
                         stationGroupSystem = {getStationGroup = function(station)
                             return stationGroups[station]
                         end},
-                        lineSystem = {getLineStops = function(group)
+                        lineSystem = {getLinesForStationGroup = function(group)
                             local result = {}
                             for entity, component in pairs(components) do
                                 if component.LINE then
                                     for index, stop in ipairs(component.LINE.stops) do
                                         if stop.stationGroup == group then
-                                            result[#result + 1] = {entity, index - 1}
+                                            result[#result + 1] = entity
+                                            break
                                         end
                                     end
                                 end
@@ -298,6 +300,66 @@ class AlternativesTests(unittest.TestCase):
             new_stop.pop("alternativeTerminals")
         self.assertEqual(result, original)
         self.assertEqual(self.lua.eval("#calls"), 0)
+
+    def test_gui_failure_after_first_stop_preserves_full_native_assignment(self):
+        self.group(100, [terminal(), terminal()])
+        self.group(200, [terminal(), terminal()])
+        original = [stop(100), stop(200)]
+        self.lua.execute("""
+            local getComponent = api.engine.getComponent
+            api.engine.getComponent = function(entity, kind)
+                if entity == 200 then error('station data unavailable') end
+                return getComponent(entity, kind)
+            end
+        """)
+        result = self.auto_assign(original, entity=None)
+        self.assertEqual(result, original)
+        self.assertEqual(self.lua.eval("#warnings"), 1)
+        self.assertIn("station data unavailable", self.lua.eval("warnings[1]"))
+
+    def test_repeated_visits_share_only_current_assignment_station_snapshot(self):
+        self.group(100, [terminal(), terminal()])
+        self.lua.execute("""
+            reads = {}
+            local getComponent = api.engine.getComponent
+            api.engine.getComponent = function(entity, kind)
+                reads[entity] = (reads[entity] or 0) + 1
+                return getComponent(entity, kind)
+            end
+        """)
+        original = [stop(100), stop(100, platform=1)]
+        result = self.auto_assign(original, entity=None)
+        self.assertEqual(alternatives(result), [(0, 1)])
+        self.assertEqual(alternatives(result, 1), [(0, 0)])
+        self.assertEqual(self.lua.eval("reads[100]"), 1)
+        self.assertEqual(self.lua.eval("reads[1000]"), 2)
+        self.group(100, [terminal(), terminal(), terminal()])
+        result = self.auto_assign(original, entity=None)
+        self.assertEqual(alternatives(result), [(0, 1), (0, 2)])
+        self.assertEqual(self.lua.eval("reads[100]"), 2)
+
+    def test_known_train_line_does_not_read_station_groups(self):
+        original = [stop(100), stop(200)]
+        self.line(1, original, TRAIN)
+        self.lua.execute("""
+            local getComponent = api.engine.getComponent
+            api.engine.getComponent = function(entity, kind)
+                assert(entity == 1, 'train line must not inspect stations')
+                return getComponent(entity, kind)
+            end
+            api.engine.entityExists = function() return true end
+        """)
+        self.assertEqual(self.auto_assign(original), original)
+        self.assertEqual(self.lua.eval("#warnings"), 0)
+
+    def test_removed_previous_station_is_not_read_during_preferred_change(self):
+        self.group(100, [terminal(), terminal()])
+        original = [stop(100)]
+        self.line(1, original)
+        self.lua.globals().components[1000] = None
+        edited = [stop(100, platform=1)]
+        self.assertEqual(self.auto_assign(edited, path=self.path(edited)), edited)
+        self.assertEqual(self.lua.eval("#warnings"), 0)
 
     def test_single_and_double_roadside_stops_do_not_become_terminal_choices(self):
         self.group(100, [terminal(), terminal()], [terminal()])

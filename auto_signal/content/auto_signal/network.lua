@@ -14,6 +14,7 @@ local function compatibleSignalFrames(first, second)
 end
 
 local function component(entity, kind)
+  if not api.engine.entityExists(entity) then return nil end
   return api.engine.getComponent(entity, api.type.ComponentType[kind])
 end
 
@@ -179,7 +180,6 @@ function network.plan(signal, gap, source)
     if segment.length <= 0 then return nil, "track length unavailable" end
     total = total + segment.length
   end
-  geometry.prepare(segments)
   local base = hostSegment.base
   local seedLeft = source.left
   if base.node0 == source.node0 and base.node1 == source.node1 then
@@ -191,9 +191,6 @@ function network.plan(signal, gap, source)
   end
   local direction
   if hostSegment.forward then direction = seedLeft else direction = not seedLeft end
-  local wantedPose, poseAxis = geometry.relativePose(hostSegment.geometry, seed.pose)
-  if not hostSegment.forward then wantedPose = 3-wantedPose end
-
   local resourceId = api.res.constructionRep.find(seedObject.edgeObjectConstruction)
   local construction = resourceId >= 0 and api.res.constructionRep.get(resourceId) or nil
   local clearance = construction and construction.edgeObject and construction.edgeObject.minDistToCrossing or 0
@@ -232,6 +229,11 @@ function network.plan(signal, gap, source)
   -- the section's actual endpoints need the small construction setback.
   local positions, reason = spacing.plan(total, gap, direction, END_CLEARANCE, MAX_SIGNALS, excluded)
   if not positions then return nil, reason end
+
+  -- Reject oversized or blocked layouts before sampling every track curve.
+  geometry.prepare(segments)
+  local wantedPose, poseAxis = geometry.relativePose(hostSegment.geometry, seed.pose)
+  if not hostSegment.forward then wantedPose = 3-wantedPose end
 
   local steps, positionIndex = {}, 1
   for _, segment in ipairs(segments) do

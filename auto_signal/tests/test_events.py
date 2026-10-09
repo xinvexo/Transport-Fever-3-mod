@@ -24,8 +24,10 @@ class EventTests(unittest.TestCase):
           log = { warning = function(message) warnings[#warnings + 1] = message end }
           api = {
             engine = {
+              entityExists = function(entity) return components[entity] ~= nil end,
               getComponent = function(entity, kind)
-                return components[entity] and components[entity][kind]
+                assert(components[entity], 'getComponent requires an existing entity')
+                return components[entity][kind]
               end,
               util = { getPlayer = function() return 7 end },
               system = { streetSystem = {

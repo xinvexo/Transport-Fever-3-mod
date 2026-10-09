@@ -6,6 +6,7 @@ local function warn(message)
 end
 
 local function component(entity, kind)
+  if not api.engine.entityExists(entity) then return nil end
   return api.engine.getComponent(entity, api.type.ComponentType[kind])
 end
 

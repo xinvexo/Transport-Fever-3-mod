@@ -25,7 +25,7 @@ function M.new()
   local ctx = { stations = {}, stocks = {}, towns = {}, industries = {} }
   local system, util = api.engine.system, api.engine.util
   local passenger = api.res.cargoTypeRep.getPassengerCargoTypeId()
-  local passengerBuildings = system.townBuildingSystem.getPersonCapacity2townBuildingMap()
+  local passengerBuildings
   local stockOwners
 
   function ctx.town(id)
@@ -112,6 +112,9 @@ function M.new()
         if place and capacity and capacity.capacity > 0 then
           result.industries[place.id] = { place = place }
         elseif capacity and capacity.capacity > 0 then
+          -- The native reverse map is needed only for town passenger stops;
+          -- freight and industry-only previews should not copy the whole map.
+          passengerBuildings = passengerBuildings or system.townBuildingSystem.getPersonCapacity2townBuildingMap()
           local building = component(passengerBuildings[entity], "TOWN_BUILDING")
           local town = building and ctx.town(building.town)
           if town then result.towns[town.id] = { place = town }

@@ -71,7 +71,8 @@ class TrackWorld:
             }
         """)
         api = self.lua.globals().api
-        api.engine.getComponent = lambda entity, kind: self.components.get((entity, kind))
+        api.engine.entityExists = self.entity_exists
+        api.engine.getComponent = self.component
         api.engine.system.streetSystem.getNodeTrackSegments = (
             lambda node: self.table(self.connections[node])
         )
@@ -94,8 +95,16 @@ class TrackWorld:
         api.engine.util.transport.calcPosition = self.transport_position
         spacing = self.lua.execute((ROOT / "content/auto_signal/spacing.lua").read_text(encoding="utf-8"))
         geometry = self.lua.execute((ROOT / "content/auto_signal/geometry.lua").read_text(encoding="utf-8"))
+        self.geometry = geometry
         self.lua.globals().ug_require = lambda path: geometry if path.endswith("geometry.lua") else spacing
         self.network = self.lua.execute((ROOT / "content/auto_signal/network.lua").read_text(encoding="utf-8"))
+
+    def entity_exists(self, entity):
+        return any(key[0] == entity for key in self.components)
+
+    def component(self, entity, kind):
+        assert self.entity_exists(entity), "getComponent requires an existing entity"
+        return self.components.get((entity, kind))
 
     def table(self, value):
         return self.lua.table_from(value, recursive=True)
@@ -623,6 +632,9 @@ class NetworkTests(unittest.TestCase):
     def test_no_space_or_excessive_signal_count_preserves_seed(self):
         self.world.add_edge(101, 10, 20, 2000)
         self.world.add_signal(1001, 101)
+        self.world.geometry.prepare = self.world.lua.eval(
+            "function() error('rejected layout must not sample track curves') end"
+        )
         plan, reason = self.world.network.plan(1001, 1, self.world.source(1001))
         self.assertIsNone(plan)
         self.assertIn("count limit", reason)
@@ -632,6 +644,22 @@ class NetworkTests(unittest.TestCase):
         self.assertIsNone(plan)
         self.assertIn("no room", reason)
         self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
+
+    def test_removed_signal_is_rejected_without_reading_invalid_entity(self):
+        plan, reason = self.world.network.plan(1001, 300, self.world.table({"left": False}))
+        self.assertIsNone(plan)
+        self.assertIn("no longer exists", reason)
+
+    def test_removed_track_aborts_proposal_without_reading_invalid_entity(self):
+        self.world.add_edge(101, 10, 20, 1000)
+        self.world.add_signal(1001, 101)
+        plan = self.world.plan(1001)
+        for key in list(self.world.components):
+            if key[0] == 101:
+                del self.world.components[key]
+        proposal, reason = self.world.network.proposal(plan)
+        self.assertIsNone(proposal)
+        self.assertIn("track changed", reason)
 
     def test_native_signal_without_declared_clearance_still_avoids_road_width(self):
         self.world.add_edge(101, 10, 20, 749)

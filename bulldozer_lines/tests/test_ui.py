@@ -198,13 +198,13 @@ local function equal(a,b)
   for k in pairs(b) do if a[k]==nil then return false end end
   return true
 end
-engine = {useStepStateTimer=function(fn,interval)
+engine = {useStepStateTimer=function(fn,interval,equals)
   assert(interval==0.5)
   local initial
   if not memories[current][cursor+1] then initial=fn(nil) end
   local state=slot(initial,'state');timers[current]=function()
     local nextValue=fn(state:old())
-    if not equal(nextValue,state:old()) then state:set(nextValue) end
+    if not (equals or equal)(nextValue,state:old()) then state:set(nextValue) end
   end
   return state
 end}
@@ -357,6 +357,69 @@ class GuiTests(unittest.TestCase):
         self.lua.globals().lines = self.lua.execute((CONTENT / 'lines.lua').read_text(encoding='utf-8'))
         self.lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
         self.lua.execute("render('XinBulldozerLinesEntry'); flushEvents()")
+
+    def test_unchanged_snapshot_retains_identity_without_missing_changes(self):
+        self.lua.execute('''
+          local filters={carriers={},onlyVisible=true}
+          local old=lines.read(filters)
+          entities={33,11,22}
+          assert(lines.read(filters,old)==old)
+          assert(lines.read({carriers={}},old)~=old, 'Filter changes invalidate the snapshot')
+          visible[22]=true
+          local changed=lines.read(filters,old)
+          assert(changed~=old and changed[1].visible and not old[1].visible)
+          assert(lines.read(filters,changed)==changed)
+          names[22]=nil;entities={11,33}
+          local reduced=lines.read(filters,changed)
+          assert(reduced~=changed and #reduced==2)
+          assert(lines.read(filters,reduced)==reduced)
+          local before=windowParams.lines:old()
+          timers.XinBulldozerLinesEntry()
+          local updated=windowParams.lines:old()
+          assert(updated~=before and #updated==2)
+          dirty.XinBulldozerLinesEntry=nil
+          timers.XinBulldozerLinesEntry()
+          assert(windowParams.lines:old()==updated and not dirty.XinBulldozerLinesEntry)
+        ''')
+
+    def test_color_hook_failure_keeps_native_action_and_does_not_retry(self):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute('''
+          original={constructionActionParams={bulldozer=true}}
+          attempts,messages=0,{}
+          construction={getActionParams=function(...)
+            arguments=table.pack(...)
+            if nativeError then error(nativeError) end
+            return original
+          end}
+          local react={RegisterRecipe=function() end,RegisterWrapperRecipe=function() end,
+            RegisterPluginRecipe=function() end}
+          local builtin={}
+          function ug_require(path)
+            if path:find('construction_react_util',1,true) then return construction end
+            if path:find('building_colors.lua',1,true) then return {apply=function()
+              attempts=attempts+1;error('incompatible color data')
+            end} end
+            if path:find('/react.lua',1,true) then return react end
+            if path:find('/builtin.lua',1,true) then return builtin end
+            return {}
+          end
+          log={message=function(s) messages[#messages+1]=s end}
+        ''')
+        lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
+        lua.execute('''
+          local definition={action='ACTION_BULLDOZER'}
+          assert(construction.getActionParams({action='ACTION_STREET_BUILDER'})==original)
+          assert(attempts==0)
+          assert(construction.getActionParams(definition,'params',nil,3)==original)
+          assert(arguments.n==4 and arguments[3]==nil and arguments[4]==3)
+          local count=#messages
+          for i=1,10 do assert(construction.getActionParams(definition)==original) end
+          assert(attempts==1 and #messages==count)
+          nativeError='native failure'
+          local ok,failure=pcall(construction.getActionParams,definition)
+          assert(not ok and tostring(failure):find(nativeError,1,true))
+        ''')
 
     def test_native_name_comparison_drives_numeric_and_chinese_order(self):
         self.lua.execute('''
@@ -988,6 +1051,7 @@ class NativeContractTests(unittest.TestCase):
         self.assertIn('function(_own : any, source : { string : any })', editor)
         self.assertIn('react.useStateLazy(getFromEngine)', engine)
         self.assertIn('getFromEngine(stateData:old())', engine)
+        self.assertIn('stateEqualsFn(newState, stateData:old())', engine)
 
     def test_rendered_button_fields_match_native_userdata(self):
         source = (GAME / 'base/tealdef/scripts/builtin.d.tl').read_text(encoding='utf-8')

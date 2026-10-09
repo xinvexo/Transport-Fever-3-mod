@@ -19,11 +19,19 @@ local function reportOnce(key, stage, layer, preferred)
   ))
 end
 
-local nativeGetActionParams = construction.getActionParams
-construction.getActionParams = function(definition, ...)
-  -- Run the game's and other mods' layer configuration before changing colors.
-  local original = nativeGetActionParams(definition, ...)
-  local entity = select(5, ...)
+local enhancementFailed = false
+local function enhance(original, fn, ...)
+  if enhancementFailed then return original end
+  local ok, result = pcall(fn, ...)
+  if ok then return result end
+  -- Both hooks are shared by all construction tools. Leave their native result
+  -- intact if our display change becomes incompatible with a resource or API.
+  enhancementFailed = true
+  log.message("[Clear Catchment] Overlay disabled until reload: " .. tostring(result))
+  return original
+end
+
+local function configureAction(definition, original, entity)
   local result = appearance.apply(definition, original, entity)
   if result ~= original then
     local action = definition.action
@@ -34,15 +42,27 @@ construction.getActionParams = function(definition, ...)
   return result
 end
 
+local nativeGetActionParams = construction.getActionParams
+construction.getActionParams = function(definition, ...)
+  -- Run the game's and other mods' layer configuration before changing colors.
+  local original = nativeGetActionParams(definition, ...)
+  return enhance(original, configureAction, definition, original, select(5, ...))
+end
+
+local function configureMerged(fromConstruction, result, preferred, action)
+  -- A selected data layer replaces the construction layer after getActionParams.
+  -- Keep the existing-station overlay in the final layer selected by the game.
+  result = appearance.mergeLayer(fromConstruction, result)
+  reportOnce(action .. "/merged/" .. tostring(preferred ~= nil), "final", result, preferred ~= nil)
+  return result
+end
+
 local nativeMergeLayerConfig = construction.mergeLayerConfig
 construction.mergeLayerConfig = function(fromConstruction, preferred)
   local result = nativeMergeLayerConfig(fromConstruction, preferred)
   local action = fromConstruction and layers[fromConstruction]
   if action then
-    -- A selected data layer replaces the construction layer after getActionParams.
-    -- Keep the existing-station overlay in the final layer selected by the game.
-    result = appearance.mergeLayer(fromConstruction, result)
-    reportOnce(action .. "/merged/" .. tostring(preferred ~= nil), "final", result, preferred ~= nil)
+    return enhance(result, configureMerged, fromConstruction, result, preferred, action)
   end
   return result
 end
