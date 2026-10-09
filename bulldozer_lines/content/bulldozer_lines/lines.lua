@@ -59,17 +59,6 @@ function lines.read(filters, previous)
   return result
 end
 
-function lines.search(all, query)
-  local result = {}
-  query = string.lower(query or "")
-  for _, line in ipairs(all) do
-    if query == "" or string.find(string.lower(line.name), query, 1, true) then
-      result[#result + 1] = line
-    end
-  end
-  return result
-end
-
 function lines.setFilter(filters, key, enabled)
   local current = key == "onlyVisible" and filters.onlyVisible or filters.carriers[key]
   if (current == true) == enabled then return filters end
@@ -95,20 +84,25 @@ function lines.filter(all, filters)
   return result
 end
 
--- Stable per-row values let native dependent states redraw only changed rows.
-function lines.rows(shown, previous)
-  local result, changed = {}, false
-  for index, line in ipairs(shown) do
-    local old = previous[line.entity]
-    if old and old.name == line.name and old.index == index then
-      result[line.entity] = old
-    else
-      result[line.entity] = { name = line.name, index = index }
-      changed = true
+-- A window render uses one synchronous engine snapshot. After filter() has
+-- checked entity liveness, build the search result, keys, row subscriptions and
+-- header selection together without querying every visible entity a second time.
+function lines.windowData(all, filters, query, selected, previous)
+  local shown, keys, rows, changed, checked = {}, {}, {}, false, 0
+  query = string.lower(query or "")
+  for _, line in ipairs(lines.filter(all, filters)) do
+    if query == "" or string.find(string.lower(line.name), query, 1, true) then
+      local index, entity = #shown + 1, line.entity
+      shown[index], keys[index] = line, entity
+      if selected[entity] then checked = checked + 1 end
+      local old = previous[entity]
+      if old and old.name == line.name and old.index == index then rows[entity] = old
+      else rows[entity] = { name = line.name, index = index }; changed = true end
     end
   end
-  for entity in pairs(previous) do if not result[entity] then changed = true; break end end
-  return changed and result or previous
+  for entity in pairs(previous) do if not rows[entity] then changed = true; break end end
+  local selection = checked == 0 and 0 or (checked == #shown and 1 or -1)
+  return shown, keys, changed and rows or previous, selection
 end
 
 function lines.select(all, selected, filters)

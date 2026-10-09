@@ -43,9 +43,34 @@ function M.prepare(entries)
   end)
 end
 
-function M.ready(entry, byEntity)
-  for _, source in ipairs(entry.dependencies or {}) do
-    if byEntity[source] and not byEntity[source].done then return false end
+function M.indexDependencies(entries)
+  -- State:get returns a fresh queue. Persist only numeric positions for actual
+  -- dependency sources, rather than rebuilding an entity->entry table per batch.
+  local indices = {}
+  for _, entry in ipairs(entries) do
+    -- Stable-sort tie breakers are only needed during prepare, before the
+    -- array order is fixed. Do not keep copying them with the saved queue.
+    entry.order = nil
+    if entry.dependencies and #entry.dependencies > 0 then
+      for _, source in ipairs(entry.dependencies) do indices[source] = false end
+    else
+      -- Most entries are independent residents. Empty tables would otherwise
+      -- be serialized and copied twice per batch for every one of them.
+      entry.dependencies = nil
+    end
+  end
+  if next(indices) == nil then return indices end
+  for index, entry in ipairs(entries) do
+    if indices[entry.entity] ~= nil then indices[entry.entity] = index end
+  end
+  return indices
+end
+
+function M.ready(entry, entries, indices)
+  if not entry.dependencies then return true end
+  for _, source in ipairs(entry.dependencies) do
+    local index = indices[source]
+    if index and not entries[index].done then return false end
   end
   return true
 end

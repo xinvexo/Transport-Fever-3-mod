@@ -23,6 +23,13 @@ local function belongsToConstruction(edge)
   return owner ~= nil and owner >= 0
 end
 
+local function nodeTracks(node, cache)
+  if cache[node] == nil then
+    cache[node] = api.engine.system.streetSystem.getNodeTrackSegments(node) or {}
+  end
+  return cache[node]
+end
+
 local function edgeTransport(entity, cache)
   if not cache then return component(entity, "TRANSPORT_NETWORK") end
   if cache.transport[entity] == nil then
@@ -91,14 +98,15 @@ local function canonicalize(segments, closed)
   return segments
 end
 
-function network.corridor(seedEdge)
+function network.corridor(seedEdge, trackCache)
+  trackCache = trackCache or {}
   local seed = component(seedEdge, "BASE_EDGE")
   if not seed or belongsToConstruction(seedEdge) then return nil, "construction track" end
   local visited, count = { [seedEdge] = true }, 1
   local function walk(current, node)
     local result = {}
     while true do
-      local connected = api.engine.system.streetSystem.getNodeTrackSegments(node) or {}
+      local connected = nodeTracks(node, trackCache)
       if #connected ~= 2 then return result, false end
       local nextEdge
       if connected[1] == current then nextEdge = connected[2]
@@ -168,8 +176,10 @@ function network.plan(signal, gap, source)
   end
   local seed = signalInfo(signal)
   if not seed then return nil, "not a railway signal" end
-  local cache = { transport = {} }
-  local segments, closed = network.corridor(host)
+  -- These native lookup results belong only to this synchronous plan. Reuse
+  -- corridor topology for crossing checks, then discard it before submission.
+  local cache = { transport = {}, tracks = {} }
+  local segments, closed = network.corridor(host, cache.tracks)
   if not segments then return nil, closed end
   if closed then return nil, "closed track has no forward endpoint; original signals kept" end
 
@@ -200,7 +210,7 @@ function network.plan(signal, gap, source)
     if not data then
       data = {
         streets = api.engine.system.streetSystem.getNodeStreetSegments(node) or {},
-        tracks = api.engine.system.streetSystem.getNodeTrackSegments(node) or {},
+        tracks = nodeTracks(node, cache.tracks),
       }
       visitedNodes[node] = data
     end
@@ -230,9 +240,9 @@ function network.plan(signal, gap, source)
   local positions, reason = spacing.plan(total, gap, direction, END_CLEARANCE, MAX_SIGNALS, excluded)
   if not positions then return nil, reason end
 
-  -- Reject oversized or blocked layouts before sampling every track curve.
-  geometry.prepare(segments)
-  local wantedPose, poseAxis = geometry.relativePose(hostSegment.geometry, seed.pose)
+  -- Only edges with existing or planned signals need distance/pose sampling.
+  -- Keep each curve on its local segment so repeated signals reuse it too.
+  local wantedPose, poseAxis = geometry.relativePose(geometry.forSegment(hostSegment), seed.pose)
   if not hostSegment.forward then wantedPose = 3-wantedPose end
 
   local steps, positionIndex = {}, 1
@@ -247,7 +257,7 @@ function network.plan(signal, gap, source)
           if not compatibleSignalFrames(seed.object.edgeObjectConstruction, info.object.edgeObjectConstruction) then
             return nil, "mixed custom signal orientations cannot be compared; original signals kept"
           end
-          local pose = geometry.relativePose(segment.geometry, info.pose, poseAxis)
+          local pose = geometry.relativePose(geometry.forSegment(segment), info.pose, poseAxis)
           if not segment.forward then pose = 3-pose end
           -- Sell/rebuild only the selected direction. Even opposite-facing
           -- duplicates must remain untouched; they are outside this operation.

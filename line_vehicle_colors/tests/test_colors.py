@@ -432,6 +432,44 @@ class ColorsTests(unittest.TestCase):
         self.tick()
         self.assertEqual(self.color(101), DEFAULT)
 
+    def test_large_fleet_shares_line_reads_within_each_bounded_batch(self):
+        self.line()
+        for entity in range(100, 612):
+            self.vehicle(entity)
+        self.lua.execute("""
+            lineReads = 0
+            local getComponent = api.engine.getComponent
+            api.engine.getComponent = function(entity, kind)
+                if entity == 10 then lineReads = lineReads + 1 end
+                return getComponent(entity, kind)
+            end
+        """)
+        for _ in range(32):
+            before = len(self.g.calls)
+            self.tick()
+            self.assertEqual(len(self.g.calls) - before, 16)
+        self.assertIsNone(self.g.state.value.vehicles)
+        self.assertLessEqual(self.g.lineReads, 3 * 32 + 2)
+        self.assertEqual([entry.entity for entry in self.g.calls.values()], list(range(100, 612)))
+
+    def test_pending_state_reload_preserves_attempts_and_command_order(self):
+        self.line()
+        for entity in range(100, 164):
+            self.vehicle(entity)
+        self.tick()
+        self.g.state.value.vehicles[116].attempts = 5
+        self.g.reject[116] = True
+        self.load_script()
+        self.tick()
+        self.assertEqual(self.g.state.value.vehicles[116].attempts, 6)
+        self.g.reject[116] = False
+        self.load_script()
+        self.tick(4)
+        self.assertIsNone(self.g.state.value.vehicles)
+        self.assertEqual(len(self.g.calls), 65)
+        for entity in range(100, 164):
+            self.assertEqual(self.color(entity), RED)
+
     def test_manifest_and_game_script_entry(self):
         manifest = json.loads((ROOT / "mod.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["modId"], "xin_line_vehicle_colors_1")

@@ -48,8 +48,10 @@ local function enqueue(current, request)
   if type(request.entity) ~= "number" or type(request.line) ~= "number"
     or request.entity < 0 or request.line < 0 then return end
   current.vehicles = current.vehicles or {}
+  -- Unattempted requests need no saved counter; the pending fleet is copied
+  -- by state:get/set each batch, so keep each untouched request minimal.
   current.vehicles[request.entity] = { line = request.line, fromLine = request.fromLine,
-    revision = request.revision, models = request.models, attempts = 0 }
+    revision = request.revision, models = request.models }
 end
 
 local function sortedKeys(values)
@@ -59,7 +61,7 @@ local function sortedKeys(values)
   return result
 end
 
-local function syncVehicle(entity, request, player, paintable, budget)
+local function syncVehicle(entity, request, player, paintable, budget, lines)
   if not owned(entity, player) then return true end
   if request.revision and api.engine.getRevision(entity).num[1] ~= request.revision then return true end
   local vehicle = component(entity, "TRANSPORT_VEHICLE")
@@ -69,7 +71,19 @@ local function syncVehicle(entity, request, player, paintable, budget)
     -- vehicle and target; abandon it if another dispatch has sent it elsewhere.
     return request.fromLine == nil or vehicle.line ~= request.fromLine
   end
-  if not owned(request.line, player) or not component(request.line, "LINE") then return true end
+  -- Color commands change vehicles only. Share a line snapshot within this
+  -- synchronous batch; take fresh ownership/color reads on the next update.
+  local line = lines[request.line]
+  if line == nil then
+    if not owned(request.line, player) or not component(request.line, "LINE") then
+      line = false
+    else
+      local value = component(request.line, "COLOR")
+      line = { color = value and validColor(value.color) and value.color or nil }
+    end
+    lines[request.line] = line
+  end
+  if not line then return true end
   if request.models then
     local parts = vehicle.transportVehicleConfig.vehicles
     if #parts ~= #request.models then return false end
@@ -77,11 +91,10 @@ local function syncVehicle(entity, request, player, paintable, budget)
       if parts[index].part.modelId ~= model then return false end
     end
   end
-  local lineColor = component(request.line, "COLOR")
-  if not lineColor or not validColor(lineColor.color) then return false end
-  if not needsColor(vehicle, lineColor.color, paintable) then return true end
+  if not line.color then return false end
+  if not needsColor(vehicle, line.color, paintable) then return true end
 
-  local color = lineColor.color:clone()
+  local color = line.color:clone()
   budget.sent = budget.sent + 1
   -- Simulation updates reject callbacks; confirm the result with a fresh read.
   api.cmd.sendCommand(api.cmd.makeEntitySetColorCmd(entity, color))
@@ -144,11 +157,11 @@ function data()
       end
       if current.lines and not next(current.lines) then current.lines = nil end
 
-      local checked, paintable, budget = 0, {}, { sent = 0 }
+      local checked, paintable, budget, lines = 0, {}, { sent = 0 }, {}
       for _, entity in ipairs(sortedKeys(current.vehicles)) do
         local request = current.vehicles[entity]
-        request.attempts = request.attempts + 1
-        local ok, done = pcall(syncVehicle, entity, request, player, paintable, budget)
+        request.attempts = (request.attempts or 0) + 1
+        local ok, done = pcall(syncVehicle, entity, request, player, paintable, budget, lines)
         if not ok and not request.warned then
           request.warned = true
           log.warning("[Line Vehicle Colors] Vehicle " .. tostring(entity) .. ": " .. tostring(done))

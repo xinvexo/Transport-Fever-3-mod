@@ -632,7 +632,7 @@ class NetworkTests(unittest.TestCase):
     def test_no_space_or_excessive_signal_count_preserves_seed(self):
         self.world.add_edge(101, 10, 20, 2000)
         self.world.add_signal(1001, 101)
-        self.world.geometry.prepare = self.world.lua.eval(
+        self.world.geometry.forSegment = self.world.lua.eval(
             "function() error('rejected layout must not sample track curves') end"
         )
         plan, reason = self.world.network.plan(1001, 1, self.world.source(1001))
@@ -644,6 +644,45 @@ class NetworkTests(unittest.TestCase):
         self.assertIsNone(plan)
         self.assertIn("no room", reason)
         self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
+
+    def test_sparse_layout_samples_only_used_edges_and_rechecks_topology_next_plan(self):
+        for index in range(9):
+            self.world.add_edge(101 + index, index + 1, index + 2, 100)
+        self.world.add_signal(1001, 105)
+        self.world.add_signal(1002, 101, reversed=True)
+        self.world.lua.globals().geometryModule = self.world.geometry
+        self.world.lua.execute("""
+            sampledEdges = {}
+            local forSegment = geometryModule.forSegment
+            geometryModule.forSegment = function(segment)
+                if not segment.geometry then
+                    sampledEdges[segment.entity] = (sampledEdges[segment.entity] or 0) + 1
+                end
+                return forSegment(segment)
+            end
+        """)
+        queried = defaultdict(int)
+
+        def query(node):
+            queried[node] += 1
+            return self.world.table(self.world.connections[node])
+
+        self.world.lua.globals().api.engine.system.streetSystem.getNodeTrackSegments = query
+        plan = self.world.plan(1001)
+        self.assertEqual(sequence(plan.positions), [299, 599, 899])
+        self.assertEqual(dict(self.world.lua.globals().sampledEdges),
+                         {101: 1, 103: 1, 105: 1, 106: 1, 109: 1})
+        self.assertEqual(dict(queried), {node: 1 for node in range(1, 11)})
+
+        # A later event must read fresh topology and curve data. A branch added
+        # at node 6 now ends the source section after only five track segments.
+        self.world.add_edge(901, 6, 100, 50)
+        queried.clear()
+        plan = self.world.plan(1001)
+        self.assertEqual(sequence(plan.sourceEdges), [101, 102, 103, 104, 105])
+        self.assertEqual(sequence(plan.positions), [199, 499])
+        self.assertEqual(dict(queried), {node: 1 for node in range(1, 7)})
+        self.assertEqual(self.world.lua.globals().sampledEdges[105], 2)
 
     def test_removed_signal_is_rejected_without_reading_invalid_entity(self):
         plan, reason = self.world.network.plan(1001, 300, self.world.table({"left": False}))

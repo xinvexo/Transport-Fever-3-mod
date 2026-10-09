@@ -67,20 +67,26 @@ function data()
             .. current.prepareAttempts .. "): " .. (ok and ("invalid plan result: " .. type(entries)) or tostring(entries)))
           return
         end
-        current.entries, current.queueRevision = entries, nil
+        current.entries, current.queueRevision, current.dependencyIndexes = entries, nil, nil
         state:set(current)
         log.message("[Chinese Map Names] Prepared " .. #entries .. " existing names for a new map game.")
       end
       local entries = current.entries
       if current.queueRevision ~= prepareRevision then
         queue.prepare(entries)
+        current.dependencyIndexes = nil
         current.queueRevision, current.prepareRevision, current.cursor = prepareRevision, prepareRevision, 1
         queue.report(current)
+      end
+      if not current.dependencyIndexes then
+        -- Add indices to an in-flight revision-8 save without replaying,
+        -- reordering, resetting retries, or retiring its existing task.
+        current.dependencyIndexes = queue.indexDependencies(entries)
       end
       current.tick = (current.tick or 0) + 1
       while entries[current.cursor] and entries[current.cursor].done do current.cursor = current.cursor + 1 end
       if current.cursor > #entries then
-        current.done, current.entries = true, nil
+        current.done, current.entries, current.dependencyIndexes = true, nil, nil
         local ok, report = pcall(planner.audit)
         if ok then
           current.audit = report
@@ -98,8 +104,7 @@ function data()
           .. current.failed .. " failed; remaining foreign names: " .. (ok and report.remaining or "unknown") .. ".")
         return
       end
-      local byEntity, submitted = {}, 0
-      for _, entry in ipairs(entries) do byEntity[entry.entity] = entry end
+      local submitted = 0
       -- A finite active queue, not a periodic world scan: batch independent
       -- names, and wait only for actual parent/stem dependencies.
       for index = current.cursor, #entries do
@@ -127,14 +132,14 @@ function data()
             -- Legacy queues can contain computed station/person/street names.
             -- Wait for their parent if needed, but NEVER submit a name write
             -- on an entity without NAME, regardless of its visible title.
-            if queue.ready(entry, byEntity) then
+            if queue.ready(entry, entries, current.dependencyIndexes) then
               entry.done, current.skipped = true, current.skipped + 1
               current.missingName = (current.missingName or 0) + 1
               if current.missingName <= 5 then
                 log.warning("[Chinese Map Names] Kept computed name without NAME component, entity " .. entry.entity)
               end
             end
-          elseif queue.ready(entry, byEntity) and (not entry.retryAt or current.tick >= entry.retryAt) then
+          elseif queue.ready(entry, entries, current.dependencyIndexes) and (not entry.retryAt or current.tick >= entry.retryAt) then
             if entry.nativeTown and (not api.engine.entityExists(entry.nativeTown)
               or names.ownName(entry.nativeTown) ~= entry.nativeTownName) then
               entry.done, current.skipped = true, current.skipped + 1

@@ -124,21 +124,18 @@ LineWindow = react.RegisterWrapperRecipe("XinBulldozerLineWindow", builtin.Windo
     },
     onValueChange = function(value) filterChanged("onlyVisible", value) end,
   }
-  local shown = lines.search(lines.filter(all:old(), filters:old()), search:old())
+  local shown, rowKeys, nextRows, selectionValue = lines.windowData(
+    all:old(), filters:old(), search:old(), selected:old(), rowData:get()
+  )
   local allCheckbox = builtin.CheckBox{
     meta = { class = "bl-check", localKey = "select-all", enabled = #shown > 0, tooltip = _("Select displayed lines") },
-    value = lines.selectionValue(shown, selected:old()),
+    value = selectionValue,
     triStateSupport = false,
     onValueChange = function()
       if not params.isCurrent() or params.selected:hasExpired() then return end
       params.selected:transform(function(previous) return lines.toggleAll(shown, previous) end)
     end,
   }
-  local rowKeys = {}
-  for index, line in ipairs(shown) do
-    rowKeys[index] = line.entity
-  end
-  local nextRows = lines.rows(shown, rowData:get())
   if nextRows ~= rowData:get() then rowData:set(nextRows) end
   local function setSearch(value)
     if params.isCurrent() and not search:hasExpired() and search:old() ~= value then search:set(value) end

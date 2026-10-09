@@ -63,12 +63,13 @@ local function interpolate(points, value, source, target)
   return a[target]+(b[target]-a[target])*t
 end
 
-function geometry.prepare(segments)
-  for _, segment in ipairs(segments) do segment.geometry = curve(segment.base) end
+function geometry.forSegment(segment)
+  if not segment.geometry then segment.geometry = curve(segment.base) end
+  return segment.geometry
 end
 
 function geometry.parameterAt(segment, fraction)
-  local curveData = segment.geometry
+  local curveData = geometry.forSegment(segment)
   return interpolate(curveData.points, fraction*curveData.length, "distance", "t")
 end
 

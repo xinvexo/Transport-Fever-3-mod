@@ -190,6 +190,62 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(self.g.state.value.skipped, 2)
         self.assertIsNone(self.g.state.value.entries)
 
+    def test_independent_queue_indexes_once_and_does_not_persist_empty_dependency_tables(self):
+        queue = self.require("xin_chinese_map_names_1::/chinese_map_names/queue.lua")
+        self.g.queue = queue
+        self.lua.execute('''
+          indexCalls = 0
+          local indexDependencies = queue.indexDependencies
+          queue.indexDependencies = function(entries)
+            indexCalls = indexCalls + 1
+            return indexDependencies(entries)
+          end
+          for entity = 1, 130 do world[entity] = {person = true, name = "Resident " .. entity} end
+        ''')
+        self.start()
+        self.update()
+        self.assertEqual(self.g.indexCalls, 1)
+        self.assertEqual(dict(self.g.state.value.dependencyIndexes), {})
+        self.assertTrue(all(entry.dependencies is None for entry in self.g.state.value.entries.values()))
+        self.assertTrue(all(entry.order is None for entry in self.g.state.value.entries.values()))
+        self.g.events = self.events = self.resource("chinese_map_names/events.script.lua")
+        self.update(3)
+        self.assertEqual(self.g.indexCalls, 1)
+        self.assertTrue(self.g.state.value.done)
+        self.assertEqual(self.g.state.value.renamed, 130)
+        self.assertIsNone(self.g.state.value.dependencyIndexes)
+
+    def test_existing_revision_eight_queue_keeps_cursor_dependencies_and_retry_window(self):
+        self.lua.execute('''
+          deferred = true
+          world[100] = {town = true, name = "长沙"}
+          world[900] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 100}
+          state:set({started = true, prepareRevision = 8, queueRevision = 8, prepareAttempts = 1,
+            cursor = 2, tick = 8, renamed = 1, skipped = 0, failed = 0, retained = 0, entries = {
+              {entity = 100, before = "Oxford", after = "长沙", priority = 1, order = 2,
+                dependencies = {}, attempts = 1, retryAt = 8, done = true},
+              {entity = 900, before = "Oxford Coal Mine", after = "长沙 煤矿", priority = 2, order = 1,
+                dependencies = {100}, attempts = 1, retryAt = 10, nativeTown = 100, nativeTownName = "长沙"}
+            }})
+        ''')
+        self.update()
+        self.assertEqual(len(self.g.sent), 0)
+        self.assertEqual(self.g.state.value.prepareRevision, 8)
+        self.assertEqual(self.g.state.value.cursor, 2)
+        self.assertEqual(self.g.state.value.dependencyIndexes[100], 1)
+        self.assertEqual(list(self.g.state.value.entries[2].dependencies.values()), [100])
+        self.assertEqual(self.g.state.value.entries[2].attempts, 1)
+        self.assertEqual(self.g.state.value.entries[2].retryAt, 10)
+        self.g.events = self.events = self.resource("chinese_map_names/events.script.lua")
+        self.update()
+        self.assertEqual([command.entity for command in self.g.sent.values()], [900])
+        self.assertEqual(self.g.state.value.entries[2].attempts, 2)
+        self.g.flushCommands()
+        self.update(2)
+        self.assertTrue(self.g.state.value.done)
+        self.assertEqual(self.g.state.value.renamed, 2)
+        self.assertEqual(self.g.state.value.failed, 0)
+
     def test_mixed_scripts_and_empty_name_component_are_converted(self):
         self.lua.execute('''
           world[1] = {town = true, name = "Oxford 城"}

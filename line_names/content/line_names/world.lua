@@ -26,37 +26,44 @@ function M.new()
   local system, util = api.engine.system, api.engine.util
   local passenger = api.res.cargoTypeRep.getPassengerCargoTypeId()
   local passengerBuildings
-  local stockOwners
+  local stockOwners, townStockOwners
 
   function ctx.town(id)
+    if ctx.towns[id] then return ctx.towns[id] end
     if not component(id, "TOWN") then return nil end
-    if not ctx.towns[id] then
-      ctx.towns[id] = { id = id, name = util.getEntityName(id) }
-    end
+    ctx.towns[id] = { id = id, name = util.getEntityName(id) }
     return ctx.towns[id]
   end
 
-  local function owners()
-    if stockOwners then return stockOwners end
-    local result = {}
-    local function remember(entity, kind)
+  local function ownerOf(stock)
+    local function remember(result, entity, kind)
       local comp = component(entity, kind)
       if comp and comp.stockList and comp.stockList >= 0 then
         result[comp.stockList] = { id = entity, kind = kind, town = comp.town }
       end
     end
-    for _, kind in ipairs({ "INDUSTRY", "WAREHOUSE" }) do
-      for _, entity in ipairs(api.engine.getEntitiesWithComponent(api.type.ComponentType[kind])) do
-        remember(entity, kind)
+    if not stockOwners then
+      local result = {}
+      for _, kind in ipairs({ "INDUSTRY", "WAREHOUSE" }) do
+        for _, entity in ipairs(api.engine.getEntitiesWithComponent(api.type.ComponentType[kind])) do
+          remember(result, entity, kind)
+        end
       end
+      stockOwners = result
     end
+    if stockOwners[stock] then return stockOwners[stock] end
+    if townStockOwners then return townStockOwners[stock] end
+    -- Factory-to-factory freight never needs the whole town-building index.
+    -- Build it once in this synchronous plan only when a catchable stock was
+    -- not resolved as an industry or warehouse.
     -- Match the native town UI's building lookup instead of assuming every
     -- component type supports a global entity enumeration.
+    local result = {}
     for _, buildings in pairs(system.townBuildingSystem.getTown2BuildingMap()) do
-      for _, entity in ipairs(buildings) do remember(entity, "TOWN_BUILDING") end
+      for _, entity in ipairs(buildings) do remember(result, entity, "TOWN_BUILDING") end
     end
-    stockOwners = result
-    return stockOwners
+    townStockOwners = result
+    return townStockOwners[stock]
   end
 
   local function stockInfo(id)
@@ -94,7 +101,7 @@ function M.new()
     local result = { industries = {}, towns = {}, unknown = false }
     for _, entity in ipairs(system.catchmentAreaSystem.getStationCatchables(id, freight) or {}) do
       if freight then
-        local owner = owners()[entity]
+        local owner = ownerOf(entity)
         if owner and owner.kind == "INDUSTRY" then
           result.industries[owner.id] = { place = industry(owner.id), stock = stockInfo(entity) }
         elseif owner and owner.kind == "TOWN_BUILDING" then
@@ -200,31 +207,40 @@ function M.new()
         end
       end
     end
-    local supported, loaded = {}, {}
+    local supported, loaded = {}, nil
     for index, usage in pairs(util.line.getLineCapacityUsages(id, true)) do
       if usage.capacity > 0 then supported[index - 1] = true end
     end
-    for index, usage in pairs(util.line.getLineCapacityUsages(id, false)) do
-      if usage.used > 0 then loaded[index - 1] = true end
+    local function currentLoad()
+      if not loaded then
+        loaded = {}
+        for index, usage in pairs(util.line.getLineCapacityUsages(id, false)) do
+          if usage.used > 0 then loaded[index - 1] = true end
+        end
+      end
+      return loaded
     end
     local candidates = {}
     if next(supported) then
       for cargo in pairs(supported) do
-        if not next(configured) or configured[cargo] or loaded[cargo] then candidates[cargo] = true end
+        if not next(configured) or configured[cargo] or currentLoad()[cargo] then candidates[cargo] = true end
       end
     else union(candidates, configured) end
     local freightTypes, loadedFreight = {}, {}
     for cargo in pairs(candidates) do
       if cargo ~= passenger then freightTypes[cargo] = true end
     end
-    for cargo in pairs(loaded) do
-      if freightTypes[cargo] then loadedFreight[cargo] = true end
-    end
     if candidates[passenger] and next(freightTypes) then record.kind = "mixed"
     elseif candidates[passenger] then record.kind = "passenger"
     elseif next(freightTypes) then record.kind = "freight"
     else record.kind = "unknown" end
-    local cargo = sole(freightTypes) or sole(loadedFreight)
+    local cargo = sole(freightTypes)
+    if record.kind == "freight" and not cargo then
+      for candidate in pairs(currentLoad()) do
+        if freightTypes[candidate] then loadedFreight[candidate] = true end
+      end
+      cargo = sole(loadedFreight)
+    end
     if record.kind == "freight" and cargo then
       record.cargo = api.res.cargoTypeRep.get(cargo).name
     else cargo = nil end

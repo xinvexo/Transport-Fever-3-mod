@@ -144,6 +144,85 @@ class NamingTests(unittest.TestCase):
         self.line(load=(0,), supported=[0, 1, 2], carrier=1)
         self.assertEqual(self.result(), "北京 - 煤矿 - 钢铁厂 · 煤炭01")
 
+    def test_unambiguous_capacity_skips_current_load_but_loaded_override_is_kept(self):
+        self.city_pair()
+        self.lua.execute("""
+            capacityReads={all=0,current=0}
+            local native=api.engine.util.line.getLineCapacityUsages
+            api.engine.util.line.getLineCapacityUsages=function(id,all)
+                local key=all and 'all' or 'current'
+                capacityReads[key]=capacityReads[key]+1
+                return native(id,all)
+            end
+        """)
+        self.line(supported=[7])
+        self.assertEqual(self.result(), "北京 - 公交01")
+        self.assertEqual(self.g.capacityReads.all, 1)
+        self.assertEqual(self.g.capacityReads.current, 0)
+        self.line(load=(7,), supported=[7, 0], used={0: 5})
+        context = self.world.new()
+        self.assertEqual(context.line(10).kind, "mixed")
+        self.assertEqual(self.g.capacityReads.current, 1)
+        self.line(load=(0, 1), supported=[0, 1], used={1: 3})
+        context = self.world.new()
+        self.assertEqual(context.line(10).cargo, "食品")
+        self.assertEqual(self.g.capacityReads.current, 2)
+
+    def test_factory_freight_avoids_town_building_index_until_town_delivery_is_needed(self):
+        _, coal = self.industry(100, 1, "北京 煤矿", output=True)
+        _, steel = self.industry(101, 2, "天津 钢铁厂")
+        self.station(200, 1, cargo=[coal])
+        self.station(201, 2, cargo=[steel])
+        self.line(load=(0,), supported=[0])
+        self.lua.execute("""
+            buildingMapReads=0
+            local native=api.engine.system.townBuildingSystem.getTown2BuildingMap
+            api.engine.system.townBuildingSystem.getTown2BuildingMap=function()
+                buildingMapReads=buildingMapReads+1;return native()
+            end
+        """)
+        self.assertEqual(self.result(), "北京 - 煤矿 - 天津 - 钢铁厂 · 煤炭01")
+        self.assertEqual(self.g.buildingMapReads, 0)
+        _, delivery = self.building(2)
+        self.station(202, 2, cargo=[delivery])
+        self.line(20, groups=(200, 202), load=(1,), supported=[1])
+        self.g.advance()
+        self.assertEqual(self.result(20), "北京 - 天津 · 食品01")
+        self.assertEqual(self.g.buildingMapReads, 1)
+        self.assertEqual(len(self.g.warnings), 0)
+
+    def test_town_names_refresh_in_the_next_preview_plan(self):
+        self.city_pair()
+        self.line(10, supported=[7])
+        self.line(20, supported=[7])
+        self.assertEqual(self.result(10), "北京 - 公交01")
+        self.assertEqual(self.result(20), "北京 - 公交02")
+        self.g.components[1].name = "新城"
+        self.g.advance()
+        self.assertEqual(self.result(10), "新城 - 公交01")
+        self.assertEqual(self.result(20), "新城 - 公交02")
+
+    def test_interrupted_owner_index_is_rebuilt_for_the_next_line(self):
+        _, first = self.building(1)
+        _, second = self.building(1)
+        self.station(200, 1, cargo=[first])
+        self.station(201, 1, cargo=[second])
+        self.line(10, load=(1,), supported=[1], name="原线路")
+        self.line(20, load=(1,), supported=[1])
+        self.lua.execute("""
+            local failed=false
+            local native=api.engine.getComponent
+            api.engine.getComponent=function(id,kind)
+                if kind=='TOWN_BUILDING' and not failed then
+                    failed=true;error('interrupted town index')
+                end
+                return native(id,kind)
+            end
+        """)
+        self.assertEqual(self.result(10), "原线路")
+        self.assertEqual(self.result(20), "北京 · 食品配送01")
+        self.assertEqual(len(self.g.warnings), 1)
+
     def test_cross_city_industry_freight_keeps_both_towns(self):
         _, stock_a = self.industry(100, 1, "煤矿", output=True)
         _, stock_b = self.industry(101, 2, "钢铁厂")
@@ -451,6 +530,9 @@ class NativeContracts(unittest.TestCase):
             self.assertIn("function data()", archive.read("base/base_mod.script.lua").decode("utf-8"))
         engine = (game / "api/tealdef/api/engine.d.tl").read_text(encoding="utf-8")
         system = (game / "api/tealdef/api/engine/system.d.tl").read_text(encoding="utf-8")
+        util = (game / "api/tealdef/api/engine/util.d.tl").read_text(encoding="utf-8")
+        self.assertIn('whether to return all capacities or the capacities for the vehicles current load config', util)
+        self.assertIn('getLineCapacityUsages : function(line : Engine.Entity, allCapacities : boolean)', util)
         for symbol in ("stockList : Engine.Entity", "tickCount : integer", "town : Engine.Entity"):
             self.assertIn(symbol, engine)
         for symbol in ("getStationCatchables", "getPersonCapacity2townBuildingMap",

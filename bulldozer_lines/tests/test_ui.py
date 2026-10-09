@@ -504,6 +504,24 @@ class GuiTests(unittest.TestCase):
           assert(reads.names==beforeNames and reads.filters==beforeFilters and reads.visible==beforeVisible)
         ''')
 
+    def test_window_aggregation_checks_each_entity_once_and_keeps_row_subscriptions(self):
+        self.lua.execute('''
+          local snapshot=lines.read({carriers={}})
+          local native=api.engine.entityExists
+          local checks=0
+          api.engine.entityExists=function(id) checks=checks+1;return native(id) end
+          local shown,keys,rows,value=lines.windowData(snapshot,{carriers={}},'',{[22]=true},{})
+          assert(checks==3 and #shown==3 and value==-1 and keys[1]==22)
+          checks=0
+          local _,_,unchanged=lines.windowData(snapshot,{carriers={}},'',{},rows)
+          assert(checks==3 and unchanged==rows)
+          names[33]=nil
+          checks=0
+          shown,keys,rows,value=lines.windowData(snapshot,{carriers={}},'Sedona',{[11]=true},rows)
+          assert(checks==3 and #shown==1 and keys[1]==11 and value==1)
+          assert(rows[33]==nil and rows[11].index==1 and rows[22]==nil)
+        ''')
+
     def test_filter_event_reads_once_then_table_and_action_reuse_snapshot(self):
         self.lua.execute('''
           local window=render('XinBulldozerLineWindow',windowParams)
