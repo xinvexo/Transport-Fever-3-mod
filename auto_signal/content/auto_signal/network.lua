@@ -4,6 +4,14 @@ local network = {}
 local MAX_EDGES = 5000
 local MAX_SIGNALS = 1000
 local END_CLEARANCE = 1
+local NATIVE_SIGNAL_FRAMES = {
+  ["base::/infrastructure/signal/signal_path_a.con"] = true,
+  ["base::/infrastructure/signal/signal_path_c.con"] = true,
+}
+
+local function compatibleSignalFrames(first, second)
+  return first == second or (NATIVE_SIGNAL_FRAMES[first] and NATIVE_SIGNAL_FRAMES[second])
+end
 
 local function component(entity, kind)
   return api.engine.getComponent(entity, api.type.ComponentType[kind])
@@ -31,49 +39,26 @@ local function edgeLength(entity, cache)
   return length
 end
 
--- Return direction relative to BaseEdge.node0 -> node1, not the potentially
--- reversed direction of a transport-network subedge hosting the signal.
-function network.signalDirection(edge, signal, cache)
-  local transport = edgeTransport(edge, cache)
-  local queries
-  if cache then
-    cache.signals[edge] = cache.signals[edge] or {}
-    queries = cache.signals[edge]
+-- Inspect each physical entity, rather than getSignal(), which can expose
+-- only one signal per transport edge/direction and hide stacked duplicates.
+local function signalInfo(entity)
+  local list = component(entity, "SIGNAL_LIST")
+  if not list then return nil end
+  local present, oneWay = false, false
+  for _, entry in ipairs(list.signals or {}) do
+    if entry.type == api.type.Signal.Type.WAYPOINT then return nil end
+    if entry.type == api.type.Signal.Type.SIGNAL then present = true end
+    if entry.type == api.type.Signal.Type.ONE_WAY_SIGNAL then present, oneWay = true, true end
   end
-  for index in ipairs(transport and transport.edges or {}) do
-    local id
-    for _, reversed in ipairs({ false, true }) do
-      local key = index * 2 + (reversed and 1 or 0)
-      local found = queries and queries[key]
-      if found == nil then
-        id = id or api.type.EdgeId.new(edge, index - 1)
-        found = api.engine.system.signalSystem.getSignal(id, reversed) or false
-        if queries then queries[key] = found end
-      end
-      if found and found.entity == signal then
-        local opposite
-        if cache then
-          cache.orientations[edge] = cache.orientations[edge] or {}
-          opposite = cache.orientations[edge][index]
-        end
-        if opposite == nil then
-          local base = assert(component(edge, "BASE_EDGE"), "signal track no longer exists")
-          local curveData
-          opposite, curveData = geometry.transportOpposite(base, transport.edges[index].geometry,
-            cache and cache.geometry[edge])
-          if cache then
-            cache.orientations[edge][index] = opposite
-            cache.geometry[edge] = curveData
-          end
-        end
-        local list = component(signal, "SIGNAL_LIST")
-        local data = list and list.signals[found.index + 1]
-        local oneWay = data and data.type == api.type.Signal.Type.ONE_WAY_SIGNAL or false
-        return reversed ~= opposite, oneWay, data and data.type
-      end
-    end
-  end
-  return nil
+  if not present then return nil end
+  local object = component(entity, "EDGE_OBJECT")
+  if not object then return nil end
+  local value = object.params and object.params.oneWay
+  if value == 1 or value == true then oneWay = true
+  elseif value == 2 or value == false then oneWay = false end
+  local models = component(entity, "MODEL_INSTANCE_LIST")
+  local instance = models and models.fatInstances and models.fatInstances[1]
+  return { object = object, oneWay = oneWay, pose = instance and instance.transf or object.transf }
 end
 
 local function reverseSegments(segments)
@@ -172,27 +157,42 @@ local function roadClearance(edge, node, railTangent)
   return math.ceil(width/2/sine) + END_CLEARANCE
 end
 
-function network.plan(signal, gap)
+function network.plan(signal, gap, source)
   local seedObject = component(signal, "EDGE_OBJECT")
   if not seedObject then return nil, "signal no longer exists" end
   local host = api.engine.system.streetSystem.getEdgeForEdgeObject(signal)
   if not host or host < 0 then return nil, "signal has no track" end
-  local cache = { transport = {}, signals = {}, orientations = {}, geometry = {} }
-  local seedDirection, oneWay, signalType = network.signalDirection(host, signal, cache)
-  if seedDirection == nil then return nil, "signal direction unavailable" end
-  if signalType == api.type.Signal.Type.WAYPOINT then return nil, "not a signal" end
+  if not source or type(source.left) ~= "boolean" then
+    return nil, "native placement direction unavailable; manual signal kept"
+  end
+  local seed = signalInfo(signal)
+  if not seed then return nil, "not a railway signal" end
+  local cache = { transport = {} }
   local segments, closed = network.corridor(host)
   if not segments then return nil, closed end
   if closed then return nil, "closed track has no forward endpoint; original signals kept" end
 
-  local direction, total = seedDirection, 0
+  local total, hostSegment = 0, nil
   for _, segment in ipairs(segments) do
-    if segment.entity == host and not segment.forward then direction = not seedDirection end
+    if segment.entity == host then hostSegment = segment end
     segment.offset, segment.length = total, edgeLength(segment.entity, cache)
     if segment.length <= 0 then return nil, "track length unavailable" end
     total = total + segment.length
   end
-  geometry.prepare(segments, cache.geometry)
+  geometry.prepare(segments)
+  local base = hostSegment.base
+  local seedLeft = source.left
+  if base.node0 == source.node0 and base.node1 == source.node1 then
+    -- Keep the side selected by the native manual-placement proposal.
+  elseif base.node0 == source.node1 and base.node1 == source.node0 then
+    seedLeft = not seedLeft
+  else
+    return nil, "source track changed before placement; manual signal kept"
+  end
+  local direction
+  if hostSegment.forward then direction = seedLeft else direction = not seedLeft end
+  local wantedPose, poseAxis = geometry.relativePose(hostSegment.geometry, seed.pose)
+  if not hostSegment.forward then wantedPose = 3-wantedPose end
 
   local resourceId = api.res.constructionRep.find(seedObject.edgeObjectConstruction)
   local construction = resourceId >= 0 and api.res.constructionRep.get(resourceId) or nil
@@ -237,13 +237,19 @@ function network.plan(signal, gap)
   for _, segment in ipairs(segments) do
     local reversed = direction
     if not segment.forward then reversed = not reversed end
-    -- Native campaign signal checks use left = not forward = baseReversed.
     local step = { edge = segment.entity, positions = {}, remove = {}, left = reversed }
     for _, object in ipairs(segment.base.objects or {}) do
       if object[2] == api.type.enum.EdgeObjectType.SIGNAL then
-        local existingDirection, _, existingType = network.signalDirection(segment.entity, object[1], cache)
-        if existingDirection == reversed and existingType ~= api.type.Signal.Type.WAYPOINT then
-          step.remove[#step.remove + 1] = object[1]
+        local info = signalInfo(object[1])
+        if info then
+          if not compatibleSignalFrames(seed.object.edgeObjectConstruction, info.object.edgeObjectConstruction) then
+            return nil, "mixed custom signal orientations cannot be compared; original signals kept"
+          end
+          local pose = geometry.relativePose(segment.geometry, info.pose, poseAxis)
+          if not segment.forward then pose = 3-pose end
+          -- Sell/rebuild only the selected direction. Even opposite-facing
+          -- duplicates must remain untouched; they are outside this operation.
+          if pose == wantedPose then step.remove[#step.remove+1] = object[1] end
         end
       end
     end
@@ -261,7 +267,7 @@ function network.plan(signal, gap)
   for _, segment in ipairs(segments) do sourceEdges[#sourceEdges + 1] = segment.entity end
   return {
     steps = steps, model = seedObject.edgeObjectConstruction,
-    oneWay = oneWay, count = #positions,
+    oneWay = seed.oneWay, count = #positions,
     positions = positions, sourceEdges = sourceEdges,
   }
 end
@@ -276,8 +282,10 @@ function network.proposal(plan)
     if not base then return nil, "track changed before construction" end
     local removeSet, retained = {}, {}
     for _, entity in ipairs(step.remove) do
-      removeSet[entity] = true
-      removedObjects[#removedObjects + 1] = entity
+      if not removeSet[entity] then
+        removeSet[entity] = true
+        removedObjects[#removedObjects + 1] = entity
+      end
     end
     for _, object in ipairs(base.objects or {}) do
       if not removeSet[object[1]] then retained[#retained + 1] = { object[1], object[2] } end

@@ -63,11 +63,8 @@ local function interpolate(points, value, source, target)
   return a[target]+(b[target]-a[target])*t
 end
 
-function geometry.prepare(segments, cache)
-  for _, segment in ipairs(segments) do
-    segment.geometry = cache and cache[segment.entity] or curve(segment.base)
-    if cache then cache[segment.entity] = segment.geometry end
-  end
+function geometry.prepare(segments)
+  for _, segment in ipairs(segments) do segment.geometry = curve(segment.base) end
 end
 
 function geometry.parameterAt(segment, fraction)
@@ -75,31 +72,35 @@ function geometry.parameterAt(segment, fraction)
   return interpolate(curveData.points, fraction*curveData.length, "distance", "t")
 end
 
--- Native mission 02 documents that a single lane keeps transport-edge and
--- base-edge directions aligned. Otherwise compare the transport direction
--- with the local base curve, not its overall chord or node-ID ordering.
-function geometry.transportOpposite(base, transportGeometry, cachedCurve)
-  if base.laneConfigs and #base.laneConfigs == 1 then return false, cachedCurve end
-  local data = cachedCurve or curve(base)
-  local sample = api.engine.util.transport.calcPosition
-  local before, middle, after = sample(transportGeometry, .4), sample(transportGeometry, .5), sample(transportGeometry, .6)
-  local dx, dy, dz = after.x-before.x, after.y-before.y, after.z-before.z
-  assert(dx*dx+dy*dy+dz*dz > 0, "transport edge direction unavailable")
-  local nearest, dot, magnitude = math.huge, nil, nil
+-- Compare the native rendered pose in each edge's local track frame. Native
+-- Mat4f uses columns 0..3. Keep both plane-axis signs to distinguish reflection
+-- as well as rotation; complement both bits when the base edge is reversed.
+function geometry.relativePose(data, transform, axis)
+  assert(transform, "signal transform unavailable")
+  local position = transform:cols(3)
+  local nearest, tx, ty, tz = math.huge, nil, nil, nil
   for index = 1, #data.points-1 do
     local a, b = data.points[index].p, data.points[index+1].p
     local x, y, z = b.x-a.x, b.y-a.y, b.z-a.z
     local lengthSquared = x*x+y*y+z*z
     if lengthSquared > 0 then
-      local t = math.max(0,math.min(1,((middle.x-a.x)*x+(middle.y-a.y)*y+(middle.z-a.z)*z)/lengthSquared))
-      local distance = squaredDistance(middle, mix(a,b,t))
-      if distance < nearest then
-        nearest, dot, magnitude = distance, dx*x+dy*y+dz*z, math.sqrt(lengthSquared*(dx*dx+dy*dy+dz*dz))
-      end
+      local t = math.max(0,math.min(1,((position.x-a.x)*x+(position.y-a.y)*y+(position.z-a.z)*z)/lengthSquared))
+      local distance = squaredDistance(position, mix(a,b,t))
+      if distance < nearest then nearest, tx, ty, tz = distance, x, y, z end
     end
   end
-  assert(dot and math.abs(dot) > magnitude*1e-6, "transport and base directions cannot be aligned")
-  return dot < 0, data
+  assert(tx, "signal track tangent unavailable")
+  local function projection(index)
+    local column = transform:cols(index)
+    return column.x*tx+column.y*ty+column.z*tz
+  end
+  if axis == nil then axis = math.abs(projection(0)) >= math.abs(projection(1)) and 0 or 1 end
+  local dot = projection(axis)
+  assert(math.abs(dot) > 1e-6*math.sqrt(tx*tx+ty*ty+tz*tz), "signal orientation unavailable")
+  local other = transform:cols(1-axis)
+  local side = -other.x*ty+other.y*tx
+  assert(math.abs(side) > 1e-6*math.sqrt(tx*tx+ty*ty), "signal transverse orientation unavailable")
+  return (dot > 0 and 1 or 0) + (side > 0 and 2 or 0), axis
 end
 
 return geometry

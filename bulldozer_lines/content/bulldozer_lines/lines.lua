@@ -1,4 +1,5 @@
 local nativeLines = ug_require "::/gui/line_vehicle_mgmt/line_util.tl"
+local langUtil = ug_require "::/scripts/lang_util.tl"
 local lines = {}
 
 lines.categories = {
@@ -10,32 +11,46 @@ lines.categories = {
 }
 
 local function allowedCarriers(filters)
-  local allowed = {}
-  for _, category in ipairs(lines.categories) do
+  local allowed, mask = {}, 0
+  for index, category in ipairs(lines.categories) do
     if filters and filters.carriers[category.key] then
       allowed[#allowed + 1] = api.type["enum"].Carrier[category.key]
+      mask = mask + 2 ^ index
     end
   end
-  return allowed
+  return allowed, mask + (filters and filters.onlyVisible and 1 or 0)
 end
 
-function lines.read(filters)
-  local allowed = allowedCarriers(filters)
-  local result = {}
+function lines.read(filters, previous)
+  local allowed, filterKey = allowedCarriers(filters)
+  local result, oldById, byId = { filterKey = filterKey }, {}, {}
+  for _, line in ipairs(previous or {}) do oldById[line.entity] = line end
+  local orderChanged = false
   for _, entity in ipairs(api.engine.system.lineSystem.getLinesForPlayer(api.engine.util.getPlayer())) do
     if api.engine.entityExists(entity) then
-      result[#result + 1] = {
-        entity = entity, name = api.engine.util.getEntityName(entity),
-        -- Make camera movement invalidate the mirrored list while the eye is on.
-        visible = not (filters and filters.onlyVisible) or api.gui.byEntity.isLineEmptyOrVisible(entity),
-        matchesTransport = #allowed == 0 or nativeLines.filterLine(allowed, entity),
-      }
+      local old = oldById[entity]
+      local name = api.engine.util.getEntityName(entity)
+      local visible = not (filters and filters.onlyVisible) or api.gui.byEntity.isLineEmptyOrVisible(entity)
+      local matches = #allowed == 0 or nativeLines.filterLine(allowed, entity)
+      if not old or old.name ~= name then orderChanged = true end
+      local line = old
+      if not old or old.name ~= name or old.visible ~= visible or old.matchesTransport ~= matches then
+        line = { entity = entity, name = name, visible = visible, matchesTransport = matches }
+      end
+      result[#result + 1], byId[entity] = line, line
     end
   end
-  table.sort(result, function(a, b)
-    if a.name == b.name then return a.entity < b.entity end
-    return a.name < b.name
-  end)
+  -- Camera/transport changes do not change name order. Reuse it even
+  -- when the line system enumerates entities in a different order.
+  if previous and not orderChanged and #previous == #result then
+    for index, line in ipairs(previous) do result[index] = byId[line.entity] end
+  else
+    table.sort(result, function(a, b)
+      -- Same comparator as the native manager/DataTable: natural numbers and
+      -- language-aware names, without a mod-specific entity-ID tie breaker.
+      return langUtil.compareStrings(a.name, b.name) < 0
+    end)
+  end
   return result
 end
 
@@ -51,6 +66,8 @@ function lines.search(all, query)
 end
 
 function lines.setFilter(filters, key, enabled)
+  local current = key == "onlyVisible" and filters.onlyVisible or filters.carriers[key]
+  if (current == true) == enabled then return filters end
   local result = { carriers = {}, onlyVisible = filters.onlyVisible }
   for carrier, checked in pairs(filters.carriers) do result.carriers[carrier] = checked end
   if key == "onlyVisible" then result.onlyVisible = enabled
@@ -59,15 +76,34 @@ function lines.setFilter(filters, key, enabled)
 end
 
 function lines.filter(all, filters)
-  local allowed, result = allowedCarriers(filters), {}
+  local allowed, filterKey = allowedCarriers(filters)
+  local result, fromSnapshot = {}, all.filterKey == filterKey
   for _, line in ipairs(all) do
     if api.engine.entityExists(line.entity)
-      and (not filters.onlyVisible or api.gui.byEntity.isLineEmptyOrVisible(line.entity))
-      and (#allowed == 0 or nativeLines.filterLine(allowed, line.entity)) then
+      and (not filters.onlyVisible or (fromSnapshot and line.visible)
+        or (not fromSnapshot and api.gui.byEntity.isLineEmptyOrVisible(line.entity)))
+      and (#allowed == 0 or (fromSnapshot and line.matchesTransport)
+        or (not fromSnapshot and nativeLines.filterLine(allowed, line.entity))) then
       result[#result + 1] = line
     end
   end
   return result
+end
+
+-- Stable per-row values let native dependent states redraw only changed rows.
+function lines.rows(shown, previous)
+  local result, changed = {}, false
+  for index, line in ipairs(shown) do
+    local old = previous[line.entity]
+    if old and old.name == line.name and old.index == index then
+      result[line.entity] = old
+    else
+      result[line.entity] = { name = line.name, index = index }
+      changed = true
+    end
+  end
+  for entity in pairs(previous) do if not result[entity] then changed = true; break end end
+  return changed and result or previous
 end
 
 function lines.select(all, selected, filters)
@@ -84,6 +120,7 @@ function lines.select(all, selected, filters)
 end
 
 function lines.setChecked(selected, entity, checked)
+  if (selected[entity] == true) == checked then return selected end
   local result = {}
   for id, value in pairs(selected) do
     if value and api.engine.entityExists(id) then result[id] = true end

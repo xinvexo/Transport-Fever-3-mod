@@ -5,7 +5,7 @@
     "On": "On",
     "Signal spacing": "Signal spacing",
     "%.0f m": "%.0f m",
-    "Rearrange same-direction signals.": "Rearrange same-direction signals.",
+    "Replace same-direction signals in this track section.": "Replace same-direction signals in this track section.",
     "Place signals at this exact interval.": "Place signals at this exact interval."
   },
   "zh_CN": {
@@ -14,7 +14,7 @@
     "On": "开",
     "Signal spacing": "间距",
     "%.0f m": "%.0f 米",
-    "Rearrange same-direction signals.": "自动重排整段同向信号灯。",
+    "Replace same-direction signals in this track section.": "只拆除当前区段同方向旧信号灯，再按本次设置重建；反向灯不动。",
     "Place signals at this exact interval.": "从前方交点之前开始，按此间距向后布置信号灯。"
   }
 }

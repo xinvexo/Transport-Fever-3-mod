@@ -10,7 +10,7 @@ function data()
             constructionData.params[#constructionData.params + 1] = {
                key = "asEnabled",
                name = _("Auto placement"),
-               tooltip = _("Rearrange same-direction signals."),
+               tooltip = _("Replace same-direction signals in this track section."),
                values = { _("Off"), _("On") },
                uiType = "Button",
                displayMode = "Horizontal",

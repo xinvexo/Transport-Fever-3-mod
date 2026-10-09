@@ -15,12 +15,69 @@ end
 
 local currentSession
 local resetWindowPosition = true
+local refreshEvent = "xin.bulldozer.lines.changed"
+local collectingAction
+
+local function isBulldozerActive()
+  local stack = globals.getDefaultToolStackApi()
+  local tool, variant
+  if stack then tool, variant = stack.getActiveTool() end
+  return tool ~= nil and tool.name == "Construction" and variant == "bulldozer"
+end
+
+-- DataTable only passes userParam to NEW cells. Keep state handles in it;
+-- selection, filtering and renaming must also update cells already on screen.
+local LineRow = react.RegisterRecipe("XinBulldozerLineRow", function(params)
+  local user, entity = params.userParam, params.rowKey
+  local selected = react.useDependentState(user.selected, function(_, selection) return selection[entity] == true end)
+  local row = react.useDependentState(user.rows, function(_, values) return values[entity] end)
+  if not row:old() or not api.engine.entityExists(entity) then return builtin.Component{} end
+
+  local function setChecked(value)
+    if not user.isCurrent() or user.selected:hasExpired() or not api.engine.entityExists(entity) then return end
+    user.selected:transform(function(previous)
+      return lines.setChecked(previous, entity, value)
+    end)
+  end
+  local function toggleLine()
+    if not user.isCurrent() or user.selected:hasExpired() then return end
+    setChecked(not user.selected:old()[entity])
+  end
+  local name, index = row:old().name, row:old().index
+  return builtin.Button{
+    meta = { class = "bl-row" .. (index % 2 == 0 and ", alternate" or "")
+      .. (selected:old() and ", selected" or "") },
+    onClick = toggleLine,
+    content = builtin.TableLayout{
+      meta = { class = "bl-row-layout" },
+      columnWeights = { 0, 0, 1, 0 },
+      rows = { builtin.Row{ cells = {
+        builtin.CheckBox{
+          meta = { class = "bl-check", localKey = "line-check-" .. tostring(entity) },
+          value = selected:old() and 1 or 0,
+          onValueChange = function(value) setChecked(value == 1) end,
+        },
+        lineUI.ColorWidget{ meta = { class = "bl-color" }, entity = entity },
+        builtin.TextView{
+          meta = { class = "bl-name, font-scale-body" },
+          text = name, tooltipWhenClipped = name,
+        },
+        lineUI.LocateButton{
+          meta = { class = "bl-locate" }, entity = entity, tooltip = _("Locate Line"),
+          iconPathOverride = "::/gui/line_vehicle_mgmt/icons/symbol_locate_20.tga",
+        },
+      } } },
+    },
+  }
+end)
+
 local LineWindow
 LineWindow = react.RegisterWrapperRecipe("XinBulldozerLineWindow", builtin.Window, function(params)
   local selected = react.useMirrorState(params.selected)
   local all = react.useMirrorState(params.lines)
   local filters = react.useMirrorState(params.filters)
   local search = react.useState("")
+  local rowData = react.useRef({})
   react.onMount(function()
     if resetWindowPosition then
       api.gui.byId.resetMovedWindowPosition("xin.bulldozer.lines")
@@ -29,8 +86,16 @@ LineWindow = react.RegisterWrapperRecipe("XinBulldozerLineWindow", builtin.Windo
   end)
 
   local function filterChanged(key, value)
-    if params.filters:hasExpired() then return end
-    params.filters:transform(function(previous) return lines.setFilter(previous, key, value == 1) end)
+    if not params.isCurrent() or params.filters:hasExpired() then return end
+    params.filters:transform(function(previous)
+      local nextFilters = lines.setFilter(previous, key, value == 1)
+      if nextFilters ~= previous then
+        -- Recompute once at the filter event, so the table and map can share
+        -- the snapshot immediately, without waiting for the camera refresh.
+        params.lines:set(lines.read(nextFilters, params.lines:old()))
+      end
+      return nextFilters
+    end)
   end
   local buttons = {}
   for __, category in ipairs(lines.categories) do
@@ -52,59 +117,23 @@ LineWindow = react.RegisterWrapperRecipe("XinBulldozerLineWindow", builtin.Windo
   }
   local shown = lines.search(lines.filter(all:old(), filters:old()), search:old())
   local allCheckbox = builtin.CheckBox{
-    meta = { localKey = "select-all", enabled = #shown > 0, tooltip = _("Select displayed lines") },
+    meta = { class = "bl-check", localKey = "select-all", enabled = #shown > 0, tooltip = _("Select displayed lines") },
     value = lines.selectionValue(shown, selected:old()),
     triStateSupport = false,
     onValueChange = function()
-      if params.selected:hasExpired() then return end
+      if not params.isCurrent() or params.selected:hasExpired() then return end
       params.selected:transform(function(previous) return lines.toggleAll(shown, previous) end)
     end,
   }
-  local rows = {}
-  for __, line in ipairs(shown) do
-    if api.engine.entityExists(line.entity) then
-      local entity = line.entity
-      local function toggleLine()
-        if params.selected:hasExpired() then return end
-        params.selected:transform(function(previous)
-          return lines.setChecked(previous, entity, not previous[entity])
-        end)
-      end
-      rows[#rows + 1] = builtin.Button{
-        meta = {
-          localKey = tostring(entity),
-          class = "bl-row" .. (selected:old()[entity] and ", selected" or ""),
-        },
-        onClick = toggleLine,
-        content = builtin.BoxLayout{
-          orientation = builtin.type.Orientation.Horizontal,
-          children = {
-            builtin.CheckBox{
-              meta = { localKey = "line-check-" .. tostring(entity) },
-              value = selected:old()[entity] and 1 or 0,
-              onValueChange = function(value)
-                if params.selected:hasExpired() then return end
-                params.selected:transform(function(previous)
-                  return lines.setChecked(previous, entity, value == 1)
-                end)
-              end,
-            },
-            lineUI.ColorWidget{ entity = entity },
-            builtin.Button{
-              meta = { class = "bl-name" },
-              content = builtin.TextView{ meta = { class = "font-scale-body" }, text = line.name },
-              onClick = toggleLine,
-            },
-            lineUI.LocateButton{
-              entity = entity, tooltip = _("Locate Line"),
-              iconPathOverride = "::/gui/line_vehicle_mgmt/icons/symbol_locate_20.tga",
-            },
-          },
-        },
-      }
-    end
+  local rowKeys = {}
+  for index, line in ipairs(shown) do
+    rowKeys[index] = line.entity
   end
-  if #rows == 0 then rows[1] = builtin.TextView{ text = _("No matching lines") } end
+  local nextRows = lines.rows(shown, rowData:get())
+  if nextRows ~= rowData:get() then rowData:set(nextRows) end
+  local function setSearch(value)
+    if params.isCurrent() and not search:hasExpired() and search:old() ~= value then search:set(value) end
+  end
 
   return builtin.Window{
     id = "xin.bulldozer.lines",
@@ -115,45 +144,48 @@ LineWindow = react.RegisterWrapperRecipe("XinBulldozerLineWindow", builtin.Windo
     autoFocusOnBecomingVisible = false,
     autoVisibilityOnFocusChange = false,
     onClose = params.onClose,
-    content = builtin.BoxLayout{
+    content = builtin.Component{
       meta = { class = "bl-content" },
-      orientation = builtin.type.Orientation.Vertical,
-      children = {
-        builtin.TextInputField{
-          placeholderText = _("Search..."),
-          value = search:old(),
-          onTyping = function(value) search:set(value) end,
-          onValueChange = function(value) search:set(value) end,
-          onCancel = function() search:set("") end,
-          maxLength = 100,
-        },
-        builtin.Component{
-          meta = { class = "bl-card" },
-          layout = builtin.BoxLayout{
-            orientation = builtin.type.Orientation.Vertical,
-            children = {
-              builtin.FloatingLayout{
-                meta = { class = "bl-header" },
-                children = {
-                  builtin.FloatingLayoutChild{ h = 0, v = 0.5, item = allCheckbox },
-                  builtin.FloatingLayoutChild{
-                    h = 0.5, v = 0.5,
-                    item = builtin.BoxLayout{
-                      meta = { class = "bl-filters" },
-                      orientation = builtin.type.Orientation.Horizontal, children = buttons,
+      layout = builtin.BoxLayout{
+        orientation = builtin.type.Orientation.Vertical,
+        children = {
+          builtin.TextInputField{
+            placeholderText = _("Search..."),
+            value = search:old(),
+            onTyping = setSearch, onValueChange = setSearch,
+            onCancel = function() setSearch("") end,
+            maxLength = 100,
+          },
+          builtin.Component{
+            meta = { class = "bl-card" },
+            layout = builtin.BoxLayout{
+              orientation = builtin.type.Orientation.Vertical,
+              children = {
+                builtin.FloatingLayout{
+                  meta = { class = "bl-header" },
+                  children = {
+                    builtin.FloatingLayoutChild{ h = 0, v = 0.5, item = allCheckbox },
+                    builtin.FloatingLayoutChild{
+                      h = 0.5, v = 0.5,
+                      item = builtin.BoxLayout{
+                        meta = { class = "bl-filters" },
+                        orientation = builtin.type.Orientation.Horizontal, children = buttons,
+                      },
                     },
                   },
                 },
-              },
-              builtin.List{
-                meta = { class = "bl-list" },
-                children = rows,
-                orientation = builtin.type.Orientation.Vertical,
-                behavior = builtin.type.ListBehavior.Default,
-                selectionIndex = -1,
-                deselectAllowed = true, cycle = false,
-                horizontalScrollBarPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
-                verticalScrollBarPolicy = builtin.type.ScrollBarPolicy.AsNeeded,
+                builtin.DataTable{
+                  meta = { localKey = "line-table", class = "bl-list" .. (#rowKeys == 0 and ", empty" or "") },
+                  disableSortKey = true,
+                  columns = { builtin.ColumnDesc{ name = _("Name"), recipe = LineRow, weight = 1.0 } },
+                  rowKeys = rowKeys,
+                  userParam = { selected = params.selected, rows = rowData, isCurrent = params.isCurrent },
+                  scrollPolicyHorizontal = builtin.type.ScrollBarPolicy.AlwaysOff,
+                  scrollPolicyVertical = builtin.type.ScrollBarPolicy.AsNeededButAlwaysReserveSpace,
+                },
+                #rowKeys == 0 and builtin.TextView{
+                  meta = { class = "bl-empty" }, text = _("No matching lines"),
+                } or nil,
               },
             },
           },
@@ -166,11 +198,8 @@ end)
 -- This is an ordinary Lua helper, not a recipe. The native action collector
 -- requires native configuration nodes created in the current ActionFn render.
 local function makeLineViewer(session)
-  local selected = react.useMirrorState(session.selected)
-  local all = react.useMirrorState(session.lines)
-  local filters = react.useMirrorState(session.filters)
   local visualizations = {}
-  for _, line in ipairs(lines.select(all:old(), selected:old(), filters:old())) do
+  for _, line in ipairs(lines.select(session.lines:old(), session.selected:old(), session.filters:old())) do
     local visual = builtin.type.LineVisualization.new()
     visual.entity = line.entity
     visual.transparency = 1.0
@@ -188,14 +217,46 @@ local function makeLineViewer(session)
   }
 end
 
+-- Construction initially renders the default selector, then its bulldozer.
+-- Hooks added inside ActionDescriptor would reuse the selector's useRef(-1)
+-- slot. Reserve ONE stable state before the native ActionFn on every render.
+-- All native configuration nodes still belong to the original ActionFn.
+local nativeActionFn = builtin.ActionFn
+builtin.ActionFn = function(...)
+  local args = table.pack(...)
+  local params = args[args.n]
+  local updated = {}
+  for key, value in pairs(params) do updated[key] = value end
+  updated.fn = function()
+    local revision = react.useState(0)
+    local owner = { bulldozer = false }
+    react.onEvent(refreshEvent, function()
+      if owner.bulldozer and not revision:hasExpired() and isBulldozerActive() then
+        revision:transform(function(value) return value + 1 end)
+      end
+    end)
+    local previous = collectingAction
+    collectingAction = owner
+    local result = params.fn and params.fn() or nil
+    collectingAction = previous
+    return result
+  end
+  args[args.n] = updated
+  return nativeActionFn(table.unpack(args, 1, args.n))
+end
+
 local nativeActionDescriptor = builtin.ActionDescriptor
 builtin.ActionDescriptor = function(...)
   -- Keep optional recipe style/ref arguments and all original action children.
   local args = table.pack(...)
   local params = args[args.n]
   local session = currentSession
+  if collectingAction and type(params) == "table" and params.tool == "construction-menu-bulldozer" then
+    collectingAction.bulldozer = true
+  end
   if type(params) == "table" and params.tool == "construction-menu-bulldozer"
-    and session and not session.selected:hasExpired() and not session.lines:hasExpired()
+    and session and session.active and not session.closed
+    and not session.selected:hasExpired() and not session.lines:hasExpired()
     and not session.filters:hasExpired() then
     local updated, children = {}, {}
     for key, value in pairs(params) do updated[key] = value end
@@ -212,60 +273,86 @@ local entry = react.RegisterPluginRecipe(
   entryPoint.ModEntryPointExtension, "XinBulldozerLinesEntry", function()
     local selected = react.useState({})
     local filters = react.useState({ carriers = {}, onlyVisible = false })
-    local all = engine.useStepStateTimer(function() return lines.read(filters:old()) end, 0.5)
-    local sessionRef = react.useRef({
-      selected = selected, lines = all, filters = filters, active = false, closed = false, windowOpen = false,
-    })
+    local sessionRef = react.useRef({ active = false, closed = false, windowOpen = false })
     local session = sessionRef:get()
+    -- Retain the existing native snapshot timer for camera-dependent filters,
+    -- but do no line-system work at all while the bulldozer is inactive.
+    local all = engine.useStepStateTimer(function(previous)
+      return session.active and not session.closed and lines.read(filters:old(), previous) or {}
+    end, 0.5)
+    session.selected, session.lines, session.filters = selected, all, filters
     currentSession = session
 
     local function closeWindow()
       local windows = globals.getDefaultWindowApi()
-      if windows and session.windowOpen then windows.removeAllWindows(LineWindow) end
+      local wasOpen = session.windowOpen
       session.windowOpen = false
+      session.windowToken = nil
+      if windows and wasOpen then windows.removeAllWindows(LineWindow) end
     end
-    react.onStep(function()
+    local function syncWindow()
       if currentSession ~= session then return end
-      local stack = globals.getDefaultToolStackApi()
-      local tool, variant
-      if stack then tool, variant = stack.getActiveTool() end
-      local active = tool ~= nil and tool.name == "Construction" and variant == "bulldozer"
+      local active = isBulldozerActive()
       if active ~= session.active then
         session.active = active
         session.closed = false
-        if active then selected:set({}) else closeWindow() end
+        if active then
+          session.lastRefresh = nil
+          selected:set({})
+          all:set(lines.read(filters:old()))
+        else closeWindow() end
       end
       if active and not session.closed and not session.windowOpen then
         local windows = globals.getDefaultWindowApi()
         if windows then
+          local token = {}
+          session.windowToken, session.windowOpen = token, true
+          local function isCurrent()
+            return currentSession == session and session.windowToken == token and session.windowOpen
+          end
           windows.addSingletonWindow(LineWindow, {
             initialX = 0.018, initialY = 0.18,
             selected = selected, lines = all, filters = filters,
+            isCurrent = isCurrent,
             onClose = function()
-              if currentSession ~= session then return end
+              if not isCurrent() then return end
               session.closed = true
               closeWindow()
-              local stackApi = globals.getDefaultToolStackApi()
-              local activeTool, activeVariant
-              if stackApi then activeTool, activeVariant = stackApi.getActiveTool() end
-              if activeTool and activeTool.name == "Construction" and activeVariant == "bulldozer" then
-                api.gui.fireReactEvent("closeConstructionWindow")
+              if isBulldozerActive() then
+                react.fireEvent(nil, "closeConstructionWindow")
               end
             end,
           })
-          session.windowOpen = true
         end
       end
+    end
+    react.onMount(syncWindow)
+    react.onEvent("constructionMenuActive", function(_, event)
+      if currentSession ~= session then return end
+      if event and not event.active then
+        session.active, session.closed = false, false
+        closeWindow()
+      else syncWindow() end
     end)
+    -- State changes (including the existing camera snapshot) redraw the action
+    -- through its fixed hook, never by adding hooks to a conditional descriptor.
+    if session.active and not session.closed then
+      local last = session.lastRefresh
+      if not last or last.selected ~= selected:old() or last.lines ~= all:old() or last.filters ~= filters:old() then
+        session.lastRefresh = { selected = selected:old(), lines = all:old(), filters = filters:old() }
+        react.fireEvent(nil, refreshEvent)
+      end
+    end
     react.onUnmount(function()
       if currentSession ~= session then return end
-      closeWindow()
       currentSession = nil
+      closeWindow()
+      react.fireEvent(nil, refreshEvent)
     end)
     return nil
   end
 )
-log.message("[Bulldozer Lines] Native-style line list and linked bulldozer close loaded (revision 7).")
+log.message("[Bulldozer Lines] Native name sorting and dependent table rows loaded (revision 10).")
 
 function data()
   return { entry = entry }

@@ -35,6 +35,17 @@ class NamesTests(unittest.TestCase):
     def require(self, name):
         if name in self.lists:
             return self.lists[name]
+        if name == "::/scripts/stringutil.lua":
+            if name not in self.modules:
+                if GAME:
+                    with ZipFile(Path(GAME) / "base/content/scripts.zip") as archive:
+                        self.modules[name] = self.lua.execute(archive.read("scripts/stringutil.lua").decode("utf-8-sig"))
+                else:
+                    self.modules[name] = self.lua.execute('''return {interp = function(s, values)
+                      local result = s:gsub("(%b{})", function(w) return values[w:sub(2, -2)] or w end)
+                      return result
+                    end}''')
+            return self.modules[name]
         if name not in self.modules:
             path = name.split("::/", 1)[1]
             self.modules[name] = self.lua.execute((CONTENT / path).read_text(encoding="utf-8"))
@@ -113,26 +124,20 @@ class NamesTests(unittest.TestCase):
             self.assertEqual(config.nameId, expected)
             self.assertEqual(config.climate, "tropical")
 
-    def test_facility_stems_types_directions_and_duplicates(self):
+    def test_initial_industry_name_is_complete_and_children_inherit(self):
         self.lua.execute('''
           world[1] = {town = true, name = "Oxford"}
-          world[10] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
+          world[10] = {construction = "coal", name = "An arbitrary original title", nearestTown = 1, industries = {11}}
           world[11] = {industry = true, stem = 10, parent = 10}
-          world[20] = {station = true, name = "Oxford Central", parent = -1}
-          world[21] = {station = true, name = "Oxford West", parent = -1}
-          world[22] = {group = true, name = "Oxford Old Pier"}
-          world[23] = {group = true, name = "Oxford New Pier"}
-          world[24] = {group = true, name = "Мельница"}
-          world[25] = {group = true, name = "已有中文车站"}
+          world[20] = {group = true, name = "My independent station group"}
         ''')
         self.start()
         self.update(3)
-        self.assertIn("煤矿", self.g.world[10].name)
-        self.assertTrue(self.g.world[20].name.endswith("中心"))
-        self.assertTrue(self.g.world[21].name.endswith("西"))
-        self.assertNotEqual(self.g.world[22].name, self.g.world[23].name)
-        self.assertTrue(self.planner.hasChinese(self.g.world[24].name))
-        self.assertEqual(self.g.world[25].name, "已有中文车站")
+        expected = self.g.world[1].name + " 煤矿"
+        self.assertEqual(self.g.world[10].name, expected)
+        self.assertEqual(self.g.api.engine.util.getEntityName(11), expected)
+        self.assertIsNone(self.g.world[11].name)
+        self.assertEqual(self.g.world[20].name, "My independent station group")
 
     def test_native_lists_exhaustion_duplicates_and_determinism(self):
         self.lua.execute('''
@@ -216,7 +221,7 @@ class NamesTests(unittest.TestCase):
         ''')
         self.start()
         self.update(4)
-        for entity in (10, 11, 20, 21, 30, 31, 40, 50, 60):
+        for entity in (10, 11, 20, 21, 30, 31, 40, 60):
             self.assert_chinese(entity)
         for entity in (11, 21, 31):
             self.assertIsNone(self.g.world[entity].name)  # Do not freeze child names.
@@ -224,7 +229,8 @@ class NamesTests(unittest.TestCase):
         self.assertIn("维护设施", self.g.world[20].name)
         self.assertIn("仓库", self.g.world[30].name)
         self.assertIn("总部", self.g.world[40].name)
-        self.assertTrue(self.g.world[60].name.endswith("#3"))
+        self.assertEqual(self.g.world[60].name, self.g.world[1].name + " 信号灯")
+        self.assertEqual(self.g.world[50].name, self.g.world[1].name + " 新天鹅堡")
         self.assertEqual(self.g.state.value.audit.remaining, 0)
 
     def test_unsafe_computed_suffixes_are_reported_without_forced_overrides(self):
@@ -247,18 +253,16 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(self.g.world[70].name, "My Custom Name")
         self.assertEqual(self.g.state.value.audit.remaining, 4)
 
-    def test_chinese_stems_and_prefix_or_infix_directions_are_preserved(self):
+    def test_station_group_without_a_construction_is_not_given_an_invented_type(self):
         self.lua.execute('''
           world[1] = {town = true, name = "北京"}
           world[2] = {group = true, name = "北京 West"}
           world[3] = {group = true, name = "北京 North Station"}
-          world[4] = {group = true, name = "Upper 北京 Station"}
         ''')
         self.start()
         self.update(3)
-        self.assertEqual(self.g.world[2].name, "北京 车站西")
-        self.assertEqual(self.g.world[3].name, "北京 车站北")
-        self.assertEqual(self.g.world[4].name, "北京 车站上层")
+        self.assertEqual(self.g.world[2].name, "北京 West")
+        self.assertEqual(self.g.world[3].name, "北京 North Station")
 
     def test_default_numbered_lines_vehicles_and_bounded_unknown_name_audit(self):
         self.lua.execute('''
@@ -289,39 +293,37 @@ class NamesTests(unittest.TestCase):
           world[10] = {station = true, stem = 20, parent = 20}
           world[11] = {depot = true, stem = 20, parent = 20}
           world[12] = {industry = true, stem = 20, parent = 20}
-          world[20] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
+          world[20] = {construction = "coal", name = "Oxford", nearestTown = 1}
         ''')
         self.start()
         self.update(3)
         self.assertEqual(self.g.state.value.renamed, 2)
-        for entity in (2, 10, 11, 12):
+        for entity in (2, 11, 12):
             self.assertIsNone(self.g.world[entity].name)
-            self.assertEqual(self.g.api.engine.util.getEntityName(entity), self.g.world[20].name)
+            self.assertEqual(self.g.api.engine.util.getEntityName(entity), self.g.world[20].name + (" 站点" if entity == 2 else ""))
+        self.assertIsNone(self.g.world[10].name)
+        self.assertEqual(self.g.api.engine.util.getEntityName(10), self.g.world[20].name + " 站点")
         self.g.world[20].name = "后续手动改名"
-        self.assertEqual(self.g.api.engine.util.getEntityName(2), "后续手动改名")
+        self.assertEqual(self.g.api.engine.util.getEntityName(2), "后续手动改名 站点")
 
-    def test_direction_words_inside_complete_town_names_are_not_station_directions(self):
+    def test_old_name_words_do_not_select_the_native_town_or_facility_type(self):
         self.lua.execute('''
           world[1] = {town = true, name = "North Bend"}
           world[2] = {town = true, name = "Bend"}
-          world[3] = {group = true, name = "North Bend Station"}
-          world[4] = {group = true, name = "Upper North Bend Station"}
-          world[5] = {group = true, name = "North Bend North Station"}
+          world[3] = {construction = "farm", nearestTown = 1, name = "Bend North Station"}
         ''')
         self.start()
         self.update(3)
-        town = self.g.world[1].name
-        self.assertEqual(self.g.world[3].name, town + " 车站")
-        self.assertEqual(self.g.world[4].name, town + " 车站上层")
-        self.assertEqual(self.g.world[5].name, town + " 车站北")
+        self.assertEqual(self.g.world[3].name, self.g.world[1].name + " 作物农场")
+        self.assertGreater(self.g.closestTownQueries, 0)
 
     def test_restricted_native_iteration_keeps_towns_streets_and_factories(self):
         self.lua.execute('''
           unsupportedKinds.construction, unsupportedKinds.name = true, true
           world[1] = {town = true, name = "Oxford"}
           world[2] = {street = true, name = "High Street"}
-          world[3] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
-          world[4] = {industry = true, stem = 3, parent = 3}
+          world[3] = {construction = "coal", name = "Oxford", nearestTown = 1}
+          world[4] = {industry = true, stem = 3, parent = 3, suffix = " 煤矿"}
         ''')
         self.start()
         self.update(3)
@@ -354,7 +356,7 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(entities, {1, 3})
         self.assertEqual(self.g.fullScans, 2)
 
-    def test_revision_two_failed_job_recovers_on_load_without_new_map_event(self):
+    def test_older_failed_job_is_retired_without_touching_old_names(self):
         self.lua.execute('''
           world[1] = {town = true, name = "Oxford"}
           world[2] = {street = true, name = "High Street"}
@@ -364,10 +366,11 @@ class NamesTests(unittest.TestCase):
         ''')
         self.update(3)
         self.assertTrue(self.g.state.value.done)
-        self.assertEqual(self.g.state.value.prepareRevision, 6)
-        self.assertEqual(self.g.state.value.prepareAttempts, 1)
-        for entity in range(1, 4):
-            self.assert_chinese(entity)
+        self.assertEqual(self.g.state.value.stoppedByRevision, 8)
+        self.assertEqual(len(self.g.sent), 0)
+        self.assertEqual(self.g.fullScans, 0)
+        self.assertEqual(self.g.world[1].name, "Oxford")
+        self.assertEqual(self.g.world[3].name, "Oxford Coal Mine")
 
     def test_recovery_does_not_start_ordinary_or_completed_save_jobs(self):
         self.lua.execute('world[1] = {town = true, name = "Keep my town"}')
@@ -409,21 +412,18 @@ class NamesTests(unittest.TestCase):
         self.assertTrue(self.g.state.value.done)
         self.assertEqual(self.g.state.value.audit.remaining, 0)
 
-    def test_boolean_queue_saved_by_revision_three_is_rebuilt(self):
-        for invalid in ("true", "false", "42", '"broken"'):
+    def test_current_job_invalid_queue_is_rebuilt_without_relying_on_unpack(self):
+        for invalid in ("true", "false", "42", '\"broken\"'):
             with self.subTest(invalid=invalid):
                 self.lua.execute('''
                   world[1] = {town = true, name = "Oxford"}
-                  world[2] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
-                  state:set({started = true, prepareRevision = 3, prepareAttempts = 1,
+                  state:set({started = true, prepareRevision = 8, prepareAttempts = 1,
                     entries = ''' + invalid + ''', cursor = 1, renamed = 0, failed = 0, skipped = 0, retained = 0})
                 ''')
                 self.update(3)
                 self.assertTrue(self.g.state.value.done)
-                self.assertEqual(self.g.state.value.prepareRevision, 6)
+                self.assertEqual(self.g.state.value.prepareRevision, 8)
                 self.assert_chinese(1)
-                self.assert_chinese(2)
-                self.assertEqual(self.g.state.value.audit.remaining, 0)
 
     def test_invalid_plan_output_is_not_persisted_and_logs_are_bounded(self):
         original = self.planner.build
@@ -449,18 +449,18 @@ class NamesTests(unittest.TestCase):
         self.lua.execute('''
           deferred = true
           world[1] = {town = true, name = "Oxford"}
-          world[10] = {industry = true, stem = 20, parent = 20}
-          world[20] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
+          world[10] = {industry = true, stem = 20, parent = 20, suffix = " 煤矿"}
+          world[20] = {construction = "coal", name = "Oxford", nearestTown = 1}
         ''')
         self.start()
         self.update()
-        self.assertEqual(len(self.g.sent), 2)  # Independent town and factory names share a batch.
+        self.assertEqual(len(self.g.sent), 1)  # Confirm the changed town name before naming its factory.
         self.assertEqual(self.g.state.value.renamed, 0)
         self.assertIsNone(self.g.world[10].name)
         self.g.flushCommands()
         self.update()
         self.assertEqual(len(self.g.sent), 2)
-        self.assertEqual(self.g.state.value.renamed, 2)
+        self.assertEqual(self.g.state.value.renamed, 1)
         self.assertIsNone(self.g.world[10].name)
         self.g.flushCommands()
         self.update(2)
@@ -474,69 +474,52 @@ class NamesTests(unittest.TestCase):
         self.lua.execute('''
           deferred = true
           world[1] = {town = true, name = "Sedona"}
-          world[2] = {industry = true, stem = 3, subParent = 3}
-          world[3] = {construction = "forest", name = "Sedona Logging Camp", nearestTown = 1}
+          world[2] = {industry = true, stem = 3, subParent = 3, suffix = " 伐木营地"}
+          world[3] = {construction = "forest", name = "Sedona", nearestTown = 1}
           for i = 100, 3039 do world[i] = {person = true, name = "Resident " .. i} end
         ''')
         self.start()
         self.update()
         self.assertEqual(len(self.g.sent), 64)
         submitted = {command.entity: command.name for command in self.g.sent.values()}
-        self.assertIn(3, submitted)
-        self.assertTrue(submitted[3].endswith("伐木场"))
+        self.assertNotIn(3, submitted)  # Its town rename is still pending.
         self.assertEqual(self.g.state.value.renamed, 0)
         self.assertIsNone(self.g.world[2].name)
         self.g.flushCommands()
         self.update()
+        self.g.flushCommands()
         self.assert_chinese(1)
-        self.assertEqual(self.g.api.engine.util.getEntityName(2), self.g.world[1].name + " 伐木场")
+        self.assertEqual(self.g.api.engine.util.getEntityName(2), self.g.world[1].name + " 伐木营地")
         self.assertIsNone(self.g.world[2].name)
         self.assertFalse(bool(self.g.state.value.done))  # Factory is done while residents remain.
 
-    def test_pending_revision_four_queue_prioritizes_factory_without_renaming_city_again(self):
+    def test_older_pending_queue_is_not_replayed(self):
         self.lua.execute('''
-          deferred = true
-          world[1] = {town = true, name = "长沙"}
-          world[2] = {industry = true, stem = 3, subParent = 3}
-          world[3] = {construction = "forest", name = "Sedona Logging Camp", nearestTown = 1}
-          for i = 100, 399 do world[i] = {person = true, name = "Resident " .. i} end
-          local entries = {}
-          for i = 100, 399 do
-            entries[#entries + 1] = {entity = i, before = world[i].name, after = "王宁", attempts = 0}
-          end
-          entries[#entries + 1] = {entity = 3, before = "Sedona Logging Camp", after = "长沙 伐木场", attempts = 0}
-          state:set({started = true, prepareRevision = 4, entries = entries, cursor = 1,
-            renamed = 1, skipped = 0, failed = 0, retained = 0})
+          world[1] = {town = true, name = "株洲"}
+          world[3] = {construction = "farm", name = "株洲 车站 2", nearestTown = 1}
+          state:set({started = true, prepareRevision = 6, cursor = 1, renamed = 1,
+            skipped = 0, failed = 0, retained = 0, entries = {
+              {entity = 3, before = "株洲 车站 2", after = "株洲 作物农场", attempts = 0}
+            }})
         ''')
-        self.update()
-        self.assertEqual(self.g.sent[1].entity, 3)
-        self.assertEqual(self.g.world[1].name, "长沙")
-        self.g.flushCommands()
-        self.assertEqual(self.g.api.engine.util.getEntityName(2), "长沙 伐木场")
+        self.update(200)
+        self.assertEqual(self.g.world[3].name, "株洲 车站 2")
+        self.assertEqual(len(self.g.sent), 0)
+        self.assertEqual(self.g.fullScans, 0)
+        self.assertIsNone(self.g.state.value.entries)
 
-    def test_completed_old_map_gets_one_industry_only_repair_then_no_idle_scans(self):
+    def test_completed_old_maps_are_never_repaired_or_rescanned(self):
         self.lua.execute('''
-          world[1] = {town = true, name = "长沙"}
-          world[2] = {industry = true, stem = 3, subParent = 3}
-          world[3] = {construction = "forest", name = "Sedona Logging Camp", nearestTown = 1}
-          world[4] = {person = true, name = "Preserve my person"}
-          world[5] = {group = true, name = "Preserve my station"}
+          world[1] = {town = true, name = "大同"}
+          world[3] = {construction = "oil_well", name = "大同 车站 2", nearestTown = 1}
           state:set({started = true, done = true, prepareRevision = 4})
         ''')
-        self.update(3)
-        self.assertEqual(self.g.world[1].name, "长沙")
-        self.assertEqual(self.g.api.engine.util.getEntityName(2), "长沙 伐木场")
-        self.assertEqual(self.g.world[4].name, "Preserve my person")
-        self.assertEqual(self.g.world[5].name, "Preserve my station")
-        self.assertTrue(self.g.state.value.done)
-        scans, queries, sent = self.g.fullScans, dict(self.g.enumerationCalls), len(self.g.sent)
-        log_count, tick = len(self.g.logs), self.g.state.value.tick
         self.update(200)
-        self.assertEqual(self.g.fullScans, scans)
-        self.assertEqual(dict(self.g.enumerationCalls), queries)
-        self.assertEqual(len(self.g.sent), sent)
-        self.assertEqual(len(self.g.logs), log_count)
-        self.assertEqual(self.g.state.value.tick, tick)
+        self.assertEqual(self.g.world[3].name, "大同 车站 2")
+        self.assertEqual(len(self.g.sent), 0)
+        self.assertEqual(dict(self.g.enumerationCalls), {})
+        self.assertEqual(self.g.fullScans, 0)
+        self.assertEqual(len(self.g.logs), 0)
 
     def test_waiting_for_street_stem_does_not_block_independent_factory_batch(self):
         self.lua.execute('''
@@ -544,13 +527,15 @@ class NamesTests(unittest.TestCase):
           world[1] = {town = true, name = "Sedona"}
           world[2] = {street = true, name = "High Street"}
           world[3] = {group = true, stem = 2, suffix = " 车站"}
-          world[4] = {construction = "forest", name = "Sedona Logging Camp", nearestTown = 1}
-          world[5] = {industry = true, stem = 4, subParent = 4}
+          world[4] = {construction = "forest", name = "Sedona", nearestTown = 1}
+          world[5] = {industry = true, stem = 4, subParent = 4, suffix = " 伐木营地"}
         ''')
         self.start()
         self.update()
-        self.assertEqual({c.entity for c in self.g.sent.values()}, {1, 2, 4})
+        self.assertEqual({c.entity for c in self.g.sent.values()}, {1, 2})
         self.assertIsNone(self.g.world[3].name)
+        self.g.flushCommands()
+        self.update()
         self.g.flushCommands()
         self.update(2)
         self.assertTrue(self.g.state.value.done)
@@ -597,7 +582,7 @@ class NamesTests(unittest.TestCase):
           world[1] = {town = true, name = "长沙"}
           world[57545] = {construction = "forest", name = "Sedona Logging Camp", nearestTown = 1}
           world[57546] = {station = true, parent = 57545, stem = 57545, suffix = " Station"}
-          state:set({started = true, prepareRevision = 4, cursor = 1, renamed = 0, skipped = 0,
+          state:set({started = true, prepareRevision = 8, cursor = 1, renamed = 0, skipped = 0,
             failed = 0, retained = 0, entries = {
               {entity = 57546, before = "Sedona Logging Camp Station", after = "长沙 车站", readDisplay = true, attempts = 0},
               {entity = 57545, before = "Sedona Logging Camp", after = "长沙 伐木场", readDisplay = false, attempts = 0}
@@ -618,7 +603,7 @@ class NamesTests(unittest.TestCase):
         self.lua.execute('''
           world[1] = {town = true, name = "长沙"}
           world[57546] = {station = true, stem = 1, suffix = " Station"}
-          state:set({started = true, prepareRevision = 5, cursor = 1, renamed = 0, skipped = 0,
+          state:set({started = true, prepareRevision = 8, cursor = 1, renamed = 0, skipped = 0,
             failed = 0, retained = 0, entries = {
               {entity = 57546, before = "长沙 Station", after = "长沙 车站", readDisplay = true, attempts = 0}
             }})
@@ -639,7 +624,7 @@ class NamesTests(unittest.TestCase):
             if entity == 42 then world[42].name = nil end
             return value
           end
-          state:set({started = true, prepareRevision = 5, cursor = 1, renamed = 0, skipped = 0,
+          state:set({started = true, prepareRevision = 8, cursor = 1, renamed = 0, skipped = 0,
             failed = 0, retained = 0, entries = {
               {entity = 42, before = "John Smith", after = "王宁", readDisplay = true, attempts = 0}
             }})
@@ -662,6 +647,89 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(self.g.fullScans, 0)
         self.assertEqual(len(self.g.logs), 0)
 
+    def test_first_creation_complete_name_is_shared_by_industry_owner_and_group(self):
+        for kind, title, town in (("farm", "作物农场", "株洲"),
+                                  ("livestock_farm", "牲畜养殖场", "株洲"),
+                                  ("oil_well", "油井", "大同"),
+                                  ("oil_platform", "采油平台", "大同")):
+            with self.subTest(kind=kind):
+                self.setUp()
+                self.lua.execute('''
+                  world[1] = {town = true, name = "''' + town + '''"}
+                  world[2] = {construction = "''' + kind + '''", name = "Original Place",
+                    nearestTown = 1, industries = {3}, stations = {4}, subconstructions = {3, 4}}
+                  world[3] = {industry = true, industryConstruction = 2, stem = 2}
+                  world[4] = {station = true, parent = 2, stem = 2}
+                  world[5] = {group = true, stations = {4}, name = "Original Place Terminal"}
+                  api.engine.system.streetConnectorSystem.getConstructionClosestTown = function()
+                    error("Use the verified native first-naming town query")
+                  end
+                ''')
+                self.start()
+                self.update(3)
+                expected = town + " " + title
+                self.assertEqual(self.g.world[2].name, expected)
+                self.assertEqual(self.g.world[5].name, expected)
+                self.assertEqual(self.g.api.engine.util.getEntityName(3), expected)
+                self.assertNotIn("车站", expected)
+                self.assertIsNone(self.g.world[3].name)
+                self.assertIsNone(self.g.world[4].name)
+                self.assertEqual(self.g.unsafeNameCommands, 0)
+
+    def test_factory_name_does_not_depend_on_global_industry_enumeration_or_old_suffix(self):
+        self.lua.execute('''
+          world[1] = {town = true, name = "大同"}
+          world[2] = {construction = "oil_platform", name = "Original Place #2",
+            nearestTown = 1, industries = {3}}
+          world[3] = {industry = true, industryConstruction = 2, stem = 2}
+          local enumerate = api.engine.getEntitiesWithComponent
+          api.engine.getEntitiesWithComponent = function(kind)
+            if kind == "industry" then return {} end
+            return enumerate(kind)
+          end
+        ''')
+        self.start()
+        self.update(3)
+        self.assertEqual(self.g.world[2].name, "大同 采油平台")
+        self.assertEqual(self.g.api.engine.util.getEntityName(3), "大同 采油平台")
+
+    def test_station_reference_does_not_reclassify_fixed_farm_name(self):
+        self.lua.execute('''
+          world[1] = {town = true, name = "Oxford"}
+          world[10] = {construction = "unknown_farm", name = "Oxford Farm", nearestTown = 1}
+          world[20] = {construction = "station_con", name = "株洲 车站", nearestTown = 1}
+          world[30] = {station = true, stem = 10, parent = 20}
+          world[31] = {group = true, stations = {30}, name = "My Loading Point"}
+        ''')
+        self.start()
+        self.update(3)
+        self.assertEqual(self.g.world[10].name, "Oxford Farm")
+        self.assertEqual(self.g.world[20].name, "株洲 车站")
+        self.assertEqual(self.g.world[31].name, "My Loading Point")
+        self.assertIsNone(self.g.world[30].name)
+        self.assertTrue(any("descriptor not found" in line for line in self.g.logs.values()))
+
+    @unittest.skipUnless(GAME, "Set TF3_GAME_DIR for native translation-template checks")
+    def test_real_native_templates_supply_facility_titles(self):
+        import gettext
+
+        with (Path(GAME) / "base/strings/zh_CN/LC_MESSAGES/base.mo").open("rb") as file:
+            translations = gettext.GNUTranslations(file)
+        self.g._ = translations.gettext
+        self.lua.execute('''
+          world[1] = {town = true, name = "Oxford"}
+          world[2] = {construction = "roadDepot", name = "Oxford Road Depot", nearestTown = 1}
+          world[3] = {construction = "signal", name = "Oxford Signal #3", nearestTown = 1}
+        ''')
+        self.start()
+        self.update(3)
+        town = self.g.world[1].name
+        self.assertEqual(self.g.world[2].name,
+                         translations.gettext("{townName} Road Depot").replace("{townName}", town))
+        self.assertEqual(self.g.world[3].name,
+                         translations.gettext("{townName} {constructionName}")
+                         .replace("{townName}", town).replace("{constructionName}", "信号灯"))
+
     @unittest.skipUnless(GAME, "Set TF3_GAME_DIR for native runtime compatibility checks")
     def test_real_game_unpack_override_allows_plan_and_audit_to_finish(self):
         with ZipFile(Path(GAME) / "base/content/base.zip") as archive:
@@ -672,8 +740,8 @@ class NamesTests(unittest.TestCase):
         self.lua.execute('''
           world[1] = {town = true, name = "Oxford"}
           world[2] = {street = true, name = "High Street"}
-          world[3] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
-          world[4] = {industry = true, stem = 3, parent = 3}
+          world[3] = {construction = "coal", name = "Oxford", nearestTown = 1}
+          world[4] = {industry = true, stem = 3, parent = 3, suffix = " 煤矿"}
         ''')
         self.start()
         self.update(3)

@@ -48,20 +48,21 @@ class EventTests(unittest.TestCase):
             },
           }
           networkFake = {
-              plan = function(entity, gap)
-                return { entity = entity, spacing = gap, count = 1, positions = {999.5} }
+              plan = function(entity, gap, source)
+                return { entity = entity, spacing = gap, source = source, count = 1, positions = {999} }
               end,
               proposal = function(plan) return plan end,
           }
           function ug_require()
             return networkFake
           end
-          function place(entity, enabled, minimum, oldObjects, playerInitiated)
+          function place(entity, enabled, minimum, oldObjects, playerInitiated, left, nativeItems)
             components[entity] = { object = {
               params = { asEnabled = enabled, asMinimumSpacing = minimum }
             } }
             components[10] = { base = { node0 = 1, node1 = 2, objects = { { entity, 2 } } } }
             local street = {
+              edgeObjectsToAdd = nativeItems or {{ category=2, resultEntity=entity, left=left==true }},
               addedSegments = { { comp = components[10].base }, { comp = components[10].base } },
               removedSegments = { { comp = { objects = oldObjects or {} } } },
             }
@@ -80,6 +81,74 @@ class EventTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("calls[1].proposal.spacing"), 350)
         self.assertEqual(self.lua.eval("calls[1].context.player"), 7)
         self.assertFalse(self.lua.eval("calls[1].player"))
+        self.assertFalse(self.lua.eval("calls[1].proposal.source.left"))
+        self.assertEqual(self.lua.eval("calls[1].proposal.source.node0"), 1)
+        self.assertEqual(self.lua.eval("calls[1].proposal.source.node1"), 2)
+
+    def test_original_native_left_flag_is_copied_without_inversion(self):
+        self.lua.execute("place(100, 2, 300, nil, true, true); handlers.guiUpdate(nil, simulation, gui)")
+        self.assertTrue(self.lua.eval("calls[1].proposal.source.left"))
+
+    def test_native_result_entity_wins_over_array_order(self):
+        self.lua.execute("""
+            place(100, 2, 300, nil, true, nil, {
+                {category=2, resultEntity=900, left=true},
+                {category=2, resultEntity=100, left=false},
+            })
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertFalse(self.lua.eval("calls[1].proposal.source.left"))
+
+    def test_single_native_signal_fallback_keeps_its_exact_flag(self):
+        self.lua.execute("""
+            place(100, 2, 300, nil, true, nil, {{category=2, resultEntity=-1, left=true}})
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertTrue(self.lua.eval("calls[1].proposal.source.left"))
+
+    def test_ambiguous_native_direction_is_not_guessed(self):
+        self.lua.execute("""
+            place(100, 2, 300, nil, true, nil, {
+                {category=2, resultEntity=-1, left=true},
+                {category=2, resultEntity=-1, left=false},
+            })
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 0)
+        self.assertTrue(self.lua.eval("components[100] ~= nil"))
+        self.assertIn("could not be matched", self.lua.eval("warnings[1]"))
+
+    def test_known_different_result_entity_never_uses_single_object_fallback(self):
+        self.lua.execute("""
+            place(100, 2, 300, nil, true, nil, {{category=2, resultEntity=900, left=true}})
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 0)
+        self.assertIn("could not be matched", self.lua.eval("warnings[1]"))
+
+    def test_captured_side_keeps_proposal_node_order_not_current_edge_order(self):
+        self.lua.execute("""
+            components[100] = { object = { params = {asEnabled=2, asMinimumSpacing=300} } }
+            components[10] = { base = {node0=1, node1=2, objects={{100,2}}} }
+            handlers.handleEvent(nil, simulation, nil, 'apply_command', 'onPostBuildProposal', {{proposal={
+                edgeObjectsToAdd={{category=2, resultEntity=100, left=false}},
+                addedSegments={{comp={node0=2, node1=1, objects={{100,2}}}}},
+                removedSegments={},
+            }}, {}, {}, true})
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertFalse(self.lua.eval("calls[1].proposal.source.left"))
+        self.assertEqual(self.lua.eval("calls[1].proposal.source.node0"), 2)
+        self.assertEqual(self.lua.eval("calls[1].proposal.source.node1"), 1)
+
+    def test_unrelated_build_event_does_not_query_track_network(self):
+        self.lua.execute("""
+            api.engine.system.streetSystem.getNodeTrackSegments = function() error('unexpected scan') end
+            place(100, 2, 300, nil, true, nil, {})
+            handlers.guiUpdate(nil, simulation, gui)
+        """)
+        self.assertEqual(self.lua.eval("#calls"), 0)
+        self.assertEqual(self.lua.eval("#warnings"), 0)
 
     def test_manual_placement_does_not_start_automatic_job(self):
         self.lua.execute("place(100, 1, 300); handlers.guiUpdate(nil, simulation, gui)")

@@ -341,6 +341,38 @@ class GeometryTests(unittest.TestCase):
 
 
 class ConstructionTests(unittest.TestCase):
+    def test_grouped_export_preserves_all_edges_tags_and_free_nodes(self):
+        lua=runtime()
+        lua.execute((CONTENT/'interchange.script.lua').read_text(encoding='utf-8'))
+        update=lua.globals().data().updateFn
+        make=generator()
+        def endpoint(p,t,tag): return (tuple(p),tuple(t),tag)
+        for kind,params in geometry_cases():
+            profile=road_profile(**params)
+            net=make(kind,**params)
+            expected=[]
+            for road in net['roads']:
+                street=profile.get(road.get('profile',road['role']),profile['ramp'])
+                for index,s in enumerate(road['segments']):
+                    properties=('STREET',street,'BRIDGE' if s['bridge'] else '',
+                                '::/infrastructure/bridge/concrete.bridge' if s['bridge'] else '')
+                    expected.append((properties,
+                        endpoint(s['p0'],s['t0'],s.get('tag0',f"ip:{road['id']}:{index}")),
+                        endpoint(s['p1'],s['t1'],s.get('tag1',f"ip:{road['id']}:{index+1}"))))
+            result=unpack(update(lua.table_from({'kind':kind}),lua.table_from(params)))
+            actual,signatures=[],set()
+            for group in result['edgeLists']:
+                properties=(group['type'],group['params']['type'],group.get('edgeType',''),group.get('edgeTypeName',''))
+                self.assertNotIn(properties,signatures)
+                signatures.add(properties)
+                self.assertFalse(group['snapNodes'])
+                self.assertEqual(group['freeNodes'],list(range(len(group['edges']))))
+                for i in range(0,len(group['edges']),2):
+                    a,b=group['edges'][i:i+2]
+                    actual.append((properties,endpoint(*a),endpoint(*b)))
+            self.assertCountEqual(actual,expected,(kind,params['lanes']))
+            self.assertLessEqual(len(signatures),5)
+
     def test_drag_cache_keeps_fresh_output_and_invalidates_changed_geometry(self):
         lua = runtime()
         lua.execute('''

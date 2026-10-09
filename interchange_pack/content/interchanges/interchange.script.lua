@@ -25,17 +25,22 @@ function data()
       params = settings.normalize(params)
       local network = networkFor(captureParams.kind, params)
       local result = { models = {}, groundFaces = {}, edgeLists = {}, cost = 0 }
+      local groups = {}
       local profile = roads.select(params)
       local bridge = "::/infrastructure/bridge/" .. (params.bridge == 2 and "steel" or "concrete") .. ".bridge"
       for _, path in ipairs(network.roads) do
         local street = profile[path.profile or path.role] or profile.ramp
-        local group
         for index, s in ipairs(path.segments) do
           local kind = s.bridge and "BRIDGE" or nil
-          if not group or group.edgeType ~= kind then
+          -- Native interchanges batch disconnected edges with the same road
+          -- and bridge properties. Tags, not list boundaries, connect nodes.
+          local key = street .. "\0" .. (kind or "NORMAL") .. "\0" .. (s.bridge and bridge or "")
+          local group = groups[key]
+          if not group then
             group = { type = "STREET", edgeType = kind, params = { type = street },
               edges = {}, snapNodes = {}, freeNodes = {} }
             if s.bridge then group.edgeTypeName = bridge end
+            groups[key] = group
             result.edgeLists[#result.edgeLists+1] = group
           end
           local n = #group.edges

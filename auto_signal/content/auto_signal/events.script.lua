@@ -34,14 +34,24 @@ local function buildFailure(command)
 end
 
 local function collectJobs(event, current)
-  local old, seen = {}, {}
+  local native, byEntity = {}, {}
+  for _, item in ipairs(event.proposal.edgeObjectsToAdd or {}) do
+    if item.category == 2 and type(item.left) == "boolean" then
+      native[#native+1] = item
+      if item.resultEntity and item.resultEntity >= 0 then byEntity[item.resultEntity] = item end
+    end
+  end
+  -- Ignore road/track edits before querying the world: only an actual native
+  -- signal placement can provide the source side needed for a safe rebuild.
+  if #native == 0 then return end
+  local old, seen, candidates = {}, {}, {}
   for _, segment in ipairs(event.proposal.removedSegments or {}) do
     for _, object in ipairs(segment.comp and segment.comp.objects or {}) do old[object[1]] = true end
   end
   for _, segment in ipairs(event.proposal.addedSegments or {}) do
     if segment.comp then
-      local candidates = api.engine.system.streetSystem.getNodeTrackSegments(segment.comp.node0) or {}
-      for _, edge in ipairs(candidates) do
+      local edges = api.engine.system.streetSystem.getNodeTrackSegments(segment.comp.node0) or {}
+      for _, edge in ipairs(edges) do
         local base = component(edge, "BASE_EDGE")
         if base and ((base.node0 == segment.comp.node0 and base.node1 == segment.comp.node1)
           or (base.node0 == segment.comp.node1 and base.node1 == segment.comp.node0)) then
@@ -51,19 +61,34 @@ local function collectJobs(event, current)
               seen[entity] = true
               local data = component(entity, "EDGE_OBJECT")
               local params = data and data.params or {}
-              if params.asEnabled == 2 then
-                local gap = tonumber(params.asMinimumSpacing)
-                if gap and gap >= 1 and gap <= 2^53-1 and gap == math.floor(gap) then
-                  current.nextId = current.nextId + 1
-                  current.jobs[#current.jobs + 1] = {
-                    id = current.nextId, signal = entity, spacing = gap,
-                  }
-                end
+              local gap = tonumber(params.asMinimumSpacing)
+              if params.asEnabled == 2 and gap and gap >= 1 and gap <= 2^53-1 and gap == math.floor(gap) then
+                candidates[#candidates+1] = {
+                  signal = entity, spacing = gap,
+                  node0 = segment.comp.node0, node1 = segment.comp.node1,
+                }
               end
             end
           end
         end
       end
+    end
+  end
+  for _, candidate in ipairs(candidates) do
+    local original = byEntity[candidate.signal]
+    -- Native mission checks also use this unambiguous one-object case.
+    if not original and #native == 1 and #candidates == 1
+      and (native[1].resultEntity == nil or native[1].resultEntity < 0) then
+      original = native[1]
+    end
+    if original then
+      current.nextId = current.nextId+1
+      current.jobs[#current.jobs+1] = {
+        id = current.nextId, signal = candidate.signal, spacing = candidate.spacing,
+        source = { left = original.left, node0 = candidate.node0, node1 = candidate.node1 },
+      }
+    else
+      warn("native placement direction could not be matched; manual signal kept")
     end
   end
   while #current.jobs > 20 do table.remove(current.jobs, 1) end
@@ -73,7 +98,7 @@ end
 -- never retry with a different spacing, position, phase or number of lights.
 local function startBuild(job)
   local ok, submitted, reason = pcall(function()
-    local plan, planError = network.plan(job.signal, job.spacing)
+    local plan, planError = network.plan(job.signal, job.spacing, job.source)
     if not plan then return false, planError end
     local proposal, proposalError = network.proposal(plan)
     if not proposal then return false, proposalError end

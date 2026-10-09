@@ -83,7 +83,7 @@ class OverlayTests(unittest.TestCase):
           end
           assert(s.deleteColor.x==nativeSettings.deleteColor.x and s.noiseColor.y==nativeSettings.noiseColor.y)
           assert(not c.maintenance and not c.noise and not c.pollution and not c.addGodrays)
-          assert(s.innerAlpha==0.30 and s.buildingAlpha==0 and s.godrayAlpha==0 and s.godrayAlphaPassive==0)
+          assert(s.innerAlpha==0.80 and s.buildingAlpha==0 and s.godrayAlpha==0 and s.godrayAlphaPassive==0)
           assert(result.layerConfig.colorPassFn.keep and result.layerConfig.buildingRenderableConfig.keep)
           assert(result.layerConfig.undergroundMode)
           assert(result.constructionActionParams==original.constructionActionParams)
@@ -159,7 +159,7 @@ class OverlayTests(unittest.TestCase):
           assert(c.isVisible and c.person and c.cargo and c.entity==-1)
           assert(c.displaySettings.borderWidth==2)
           assert(math.abs(c.displaySettings.personBaseColor.x - 0.065) < 1e-8)
-          assert(c.displaySettings.innerAlpha==0.30)
+          assert(c.displaySettings.innerAlpha==0.80)
           assert(preferred.catchmentAreaRenderableConfig.displaySettings.borderWidth==9)
           assert(not preferred.catchmentAreaRenderableConfig.isVisible)
           assert(appearance.mergeLayer(enhanced,enhanced)==enhanced)

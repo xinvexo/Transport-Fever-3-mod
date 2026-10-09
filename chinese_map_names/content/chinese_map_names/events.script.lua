@@ -2,8 +2,7 @@ local planner = ug_require "xin_chinese_map_names_1::/chinese_map_names/plan.lua
 local queue = ug_require "xin_chinese_map_names_1::/chinese_map_names/queue.lua"
 local names = ug_require "xin_chinese_map_names_1::/chinese_map_names/entity_names.lua"
 local batchSize = 64
-local prepareRevision = 6
-local industryRepairBeforeRevision = 5
+local prepareRevision = 8
 
 local function isEditor()
   return (api.engine.config.getModParams()[""] or {}).isMapEditor == true
@@ -19,9 +18,9 @@ local function validPlan(entries)
   return true
 end
 
-local function newJob(industryOnly)
+local function newJob()
   return { started = true, prepareRevision = prepareRevision, prepareAttempts = 0,
-    cursor = 1, renamed = 0, failed = 0, skipped = 0, retained = 0, industryOnly = industryOnly }
+    cursor = 1, renamed = 0, failed = 0, skipped = 0, retained = 0 }
 end
 
 function data()
@@ -32,24 +31,20 @@ function data()
       if current.started then return end
       -- Persist authorization first; transient resource/initialization failures
       -- may then recover on a later update without affecting ordinary saves.
-      state:set(newJob(false))
+      state:set(newJob())
     end,
 
     update = function(_, state)
       local current = state:get() or {}
-      if not current.started then return end
-      if current.done and (not current.prepareRevision or current.prepareRevision >= industryRepairBeforeRevision) then return end
+      if not current.started or current.done then return end
       if isEditor() then return end
-      if current.done then
-        if current.prepareRevision and current.prepareRevision < industryRepairBeforeRevision then
-          -- A one-time load migration for maps already localized by an older
-          -- release. Only repair industries; never reshuffle Chinese towns.
-          current = newJob(true)
-          state:set(current)
-          log.message("[Chinese Map Names] Starting one-time industry repair for this localized map.")
-        else
-          return -- No recurring scans after this finite job finishes.
-        end
+      if current.prepareRevision ~= prepareRevision then
+        -- The user explicitly declined changes to older names/saves. Retire
+        -- stale queues once, without scanning or sending any rename commands.
+        current.done, current.entries, current.stoppedByRevision = true, nil, prepareRevision
+        state:set(current)
+        log.message("[Chinese Map Names] Older task stopped; existing names were left unchanged.")
+        return
       end
       if current.entries ~= nil and type(current.entries) ~= "table" then
         -- Revision 3 could save the pcall success flag as the queue. No rename
@@ -59,17 +54,9 @@ function data()
         state:set(current)
       end
       if not current.entries then
-        -- Revision 2 could exhaust all retries before any rename was sent.
-        -- Recover that authorized new-map job without starting jobs in saves
-        -- which never received initNewGameFromMap.
-        if current.prepareRevision ~= prepareRevision then
-          current.prepareRevision, current.prepareAttempts = prepareRevision, 0
-          log.message("[Chinese Map Names] Resuming unfinished name preparation with revision " .. prepareRevision .. ".")
-        end
         if current.prepareAttempts >= 3 then return end
         current.prepareAttempts = current.prepareAttempts + 1
         local ok, entries = pcall(function()
-          if current.industryOnly then return planner.repairIndustries() end
           local towns = ug_require "::/names/china/zh_CN/towns.lua"
           local streets = ug_require "::/names/china/zh_CN/streets.lua"
           return planner.build(towns, streets)
@@ -148,7 +135,15 @@ function data()
               end
             end
           elseif queue.ready(entry, byEntity) and (not entry.retryAt or current.tick >= entry.retryAt) then
-            if entry.attempts >= 3 then
+            if entry.nativeTown and (not api.engine.entityExists(entry.nativeTown)
+              or names.ownName(entry.nativeTown) ~= entry.nativeTownName) then
+              entry.done, current.skipped = true, current.skipped + 1
+              log.warning("[Chinese Map Names] Town name changed before construction rename, entity " .. entry.entity)
+            elseif entry.nativeOwner and (not api.engine.entityExists(entry.nativeOwner)
+              or names.ownName(entry.nativeOwner) ~= entry.after) then
+              entry.done, current.skipped = true, current.skipped + 1
+              log.warning("[Chinese Map Names] Parent construction name was not confirmed; station group kept, entity " .. entry.entity)
+            elseif entry.attempts >= 3 then
               entry.done, current.failed = true, current.failed + 1
               log.warning("[Chinese Map Names] Rename did not change the name for entity " .. entry.entity)
             else

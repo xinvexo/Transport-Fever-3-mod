@@ -2,7 +2,7 @@ local target = ug_require "xin_clear_catchment_1::/clear_catchment/target.lua"
 local appearance = {}
 
 local COLOR_SCALE = 0.65
-local INNER_ALPHA = 0.30
+local INNER_ALPHA = 0.80
 local function deepen(color)
   -- Scale all channels equally: green stays green, blue stays blue, gray stays gray.
   return api.type.Vec3f.new(color.x * COLOR_SCALE, color.y * COLOR_SCALE, color.z * COLOR_SCALE)

@@ -65,3 +65,7 @@ Hub Coverage Filters 的公开包表明：启用 CatchmentAreaRenderableConfig�
 用户请求进一步加深颜色或圈内填色，以减轻近景淡化后的不可辨认问题。revision 4 将 person/cargo/inactive/unreachable 四种基础颜色的 RGB 各通道统一乘 0.65，保留原色相；innerAlpha 从 0 调到 0.30。borderAlpha 与 borderAlphaPassive 仍为 1，线宽、半径、房屋 painter 和触发入口不变。
 
 这只是提高可辨认度，不是消除原生距离衰减；新增填充也会受该衰减影响。没有加入相机轮询或定时补偿。
+
+用户反馈 revision 4 的圈内颜色仍不明显。日志确认最终配置读回 innerAlpha≈0.30，revision 5 仅将该值提高到 0.60，保留颜色缩放、边界不透明度、线宽、半径与事件入口。强度提升仍需实机观察，尤其是范围重叠和近景。
+
+用户随后明确要求直接使用 80%。revision 6 将 innerAlpha 设为 0.80，其余显示参数和触发方式不变。

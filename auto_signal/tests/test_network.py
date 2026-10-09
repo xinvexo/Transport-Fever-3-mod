@@ -22,6 +22,8 @@ class TrackWorld:
         self.lengths = {}
         self.node_positions = {}
         self.transport_opposite = {}
+        self.native_sides = {}
+        self.next_entity = 10000
         self.lua.execute("""
             local function clone(value)
                 if type(value) ~= "table" then return value end
@@ -30,6 +32,12 @@ class TrackWorld:
                 return copy
             end
             cloneBaseEdge = clone
+            function makeTransform(columns)
+                return { cols = function(_, index)
+                    assert(index >= 0 and index <= 3, 'native matrix columns are zero based')
+                    return columns[index+1]
+                end }
+            end
             warnings = {}
             log = { warning = function(message) warnings[#warnings+1] = message end }
             api = {
@@ -80,7 +88,9 @@ class TrackWorld:
         api.engine.system.streetSystem.getEdgeForEdgeObject = (
             lambda entity: self.hosts.get(entity, -1)
         )
-        api.engine.system.signalSystem.getSignal = self.get_signal
+        # A reverse lookup cannot enumerate stacked signals. The production
+        # code must use each entity's own data, never this single-result API.
+        api.engine.system.signalSystem.getSignal = self.lua.eval("function() error('ambiguous reverse lookup used') end")
         api.engine.util.transport.calcPosition = self.transport_position
         spacing = self.lua.execute((ROOT / "content/auto_signal/spacing.lua").read_text(encoding="utf-8"))
         geometry = self.lua.execute((ROOT / "content/auto_signal/geometry.lua").read_text(encoding="utf-8"))
@@ -165,7 +175,7 @@ class TrackWorld:
             "edges": entries
         })
 
-    def add_signal(self, entity, edge, reversed=False, kind="path", fraction=0.25):
+    def add_signal(self, entity, edge, reversed=False, kind="path", fraction=0.25, native_left=None, pose_axis=0):
         index = 0
         while (edge, index, reversed) in self.signals:
             index += 1
@@ -173,10 +183,27 @@ class TrackWorld:
         current_count = len(self.components[edge, "TRANSPORT_NETWORK"].edges)
         self.set_transport_edges(edge, max(current_count, index + 1))
         self.hosts[entity] = edge
+        if native_left is None:
+            native_left = bool(reversed) != bool(self.transport_opposite.get(edge))
+        self.native_sides[entity] = native_left
+        base = self.components[edge, "BASE_EDGE"]
+        t = fraction
+        tangent = [(6*t*t-6*t)*base.position0[axis] + (3*t*t-4*t+1)*base.tangent0[axis]
+                   + (-6*t*t+6*t)*base.position1[axis] + (3*t*t-2*t)*base.tangent1[axis]
+                   for axis in ("x", "y", "z")]
+        norm = sum(v*v for v in tangent)**0.5
+        x = tuple(v/norm*(-1 if native_left else 1) for v in tangent)
+        y = (-x[1], x[0], 0)
+        if pose_axis == 1:
+            x, y = y, x
+        columns = self.table([dict(zip(("x", "y", "z"), v))
+                              for v in (x, y, (0, 0, 1), self.world_position(edge, fraction))])
         self.components[entity, "EDGE_OBJECT"] = self.table({
             "param": fraction,
             "edgeObjectConstruction": "base::/infrastructure/signal/signal_path_a.con",
+            "params": {"oneWay": 1 if kind == "one_way" else 2},
         })
+        self.components[entity, "EDGE_OBJECT"].transf = self.lua.globals().makeTransform(columns)
         self.components[entity, "SIGNAL_LIST"] = self.table({"signals": [{"type": kind}]})
         self.add_object(entity, edge, "signal")
 
@@ -189,10 +216,36 @@ class TrackWorld:
         return self.table({"entity": entity, "index": 0})
 
     def plan(self, signal, gap=300):
-        result = self.network.plan(signal, gap)
+        result = self.network.plan(signal, gap, self.source(signal))
         if isinstance(result, tuple):
             raise AssertionError(f"Planning failed: {result[1]}")
         return result
+
+    def source(self, signal):
+        base = self.components[self.hosts[signal], "BASE_EDGE"]
+        return self.table({"left": self.native_sides[signal], "node0": base.node0, "node1": base.node1})
+
+    def apply_plan(self, plan):
+        created = []
+        for step in sequence(plan.steps):
+            removed = set(sequence(step.remove))
+            base = self.components[step.edge, "BASE_EDGE"]
+            base.objects = self.table([sequence(o) for o in sequence(base.objects) if o[1] not in removed])
+            for entity in removed:
+                self.components.pop((entity, "EDGE_OBJECT"), None)
+                self.components.pop((entity, "SIGNAL_LIST"), None)
+                self.components.pop((entity, "MODEL_INSTANCE_LIST"), None)
+                self.hosts.pop(entity, None)
+                self.native_sides.pop(entity, None)
+            self.signals = {key: entity for key, entity in self.signals.items() if entity not in removed}
+            for param in sequence(step.positions):
+                self.next_entity += 1
+                entity = self.next_entity
+                query_reversed = bool(step.left) != bool(self.transport_opposite.get(step.edge))
+                self.add_signal(entity, step.edge, query_reversed,
+                                "one_way" if plan.oneWay else "path", param, native_left=step.left)
+                created.append(entity)
+        return created
 
 
 def sequence(table):
@@ -284,6 +337,130 @@ class NetworkTests(unittest.TestCase):
         self.world.lua.execute("api.engine.util.transport = nil")
         self.assert_northbound_world_layout(self.world, self.world.plan(1001))
 
+    def test_manual_proposal_side_is_authoritative_even_if_reverse_lookup_disagrees(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        # Deliberately contradictory lookup direction: only the native manual
+        # proposal and actual source pose describe the player's choice.
+        self.world.add_signal(1001, 101, True, native_left=False)
+        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
+
+    def test_repeated_builds_replace_only_same_direction_and_leave_opposite_duplicates_untouched(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        self.world.add_signal(1101, 101, True, fraction=0.5, native_left=True)
+        self.world.add_signal(1102, 101, True, fraction=0.5, native_left=True)
+        previous = set()
+        for iteration in range(4):
+            source = 2000+iteration
+            self.world.add_signal(source, 101, True, fraction=0.4, native_left=False)
+            plan = self.world.plan(source)
+            self.assertEqual(removals(plan), previous | {source})
+            self.assert_northbound_world_layout(self.world, plan)
+            previous = set(self.world.apply_plan(plan))
+            retained = {obj[1] for obj in sequence(self.world.components[101, "BASE_EDGE"].objects)}
+            self.assertEqual(retained, previous | {1101, 1102})
+            self.assertEqual(len(retained), 6)
+
+    def test_only_same_direction_stacks_are_rebuilt_opposite_stacks_are_untouched(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        for entity in (1001, 1002, 1003):
+            self.world.add_signal(entity, 101, fraction=0.999, native_left=False)
+        self.world.add_signal(1101, 101, True, fraction=0.999, native_left=True)
+        self.world.add_signal(1102, 101, True, fraction=0.999, native_left=True)
+        self.world.add_signal(1201, 101, False, "waypoint", fraction=0.999)
+        self.world.add_signal(2000, 101, fraction=0.4, native_left=False)
+        plan = self.world.plan(2000)
+        self.assertEqual(removals(plan), {1001, 1002, 1003, 2000})
+        created = set(self.world.apply_plan(plan))
+        remaining = {obj[1] for obj in sequence(self.world.components[101, "BASE_EDGE"].objects)}
+        self.assertEqual(remaining, created | {1101, 1102, 1201})
+
+    def test_native_side_is_normalized_if_engine_reverses_base_node_order(self):
+        self.world.add_edge(101, 90, 10, 1050)
+        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
+        self.world.add_signal(1001, 101, native_left=False)
+        original = self.world.source(1001)
+        base = self.world.components[101, "BASE_EDGE"]
+        base.node0, base.node1 = 10, 90
+        self.world.set_geometry(101, (0, 1050, 0), (0, 0, 0))
+        self.world.components[1001, "EDGE_OBJECT"].param = 0.75
+        plan = self.world.network.plan(1001, 300, original)
+        self.assert_northbound_world_layout(self.world, plan)
+
+    def test_missing_captured_side_never_falls_back_to_guessing(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101)
+        plan, reason = self.world.network.plan(1001, 300)
+        self.assertIsNone(plan)
+        self.assertIn("native placement direction unavailable", reason)
+
+    def test_one_way_value_comes_from_the_manual_parameter_not_a_reverse_blocker(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101)
+        self.world.components[1001, "SIGNAL_LIST"].signals = self.world.table(
+            [{"type": "one_way"}, {"type": "path"}])
+        self.assertFalse(self.world.plan(1001).oneWay)
+        self.world.components[1001, "EDGE_OBJECT"].params.oneWay = 1
+        self.assertTrue(self.world.plan(1001).oneWay)
+
+    def test_native_signal_models_can_replace_each_other_without_changing_heading(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101, native_left=False)
+        self.world.add_signal(1002, 101, native_left=False)
+        self.world.components[1001, "EDGE_OBJECT"].edgeObjectConstruction = "base::/infrastructure/signal/signal_path_c.con"
+        plan = self.world.plan(1001)
+        self.assertEqual(removals(plan), {1001, 1002})
+        self.assertEqual(plan.model, "base::/infrastructure/signal/signal_path_c.con")
+
+
+    def test_unknown_custom_model_orientation_does_not_risk_deleting_reverse_lights(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101, native_left=False)
+        self.world.add_signal(1101, 101, True, native_left=True, pose_axis=1)
+        self.world.components[1101, "EDGE_OBJECT"].edgeObjectConstruction = "custom::/rotated_signal.con"
+        plan, reason = self.world.network.plan(1001, 300, self.world.source(1001))
+        self.assertIsNone(plan)
+        self.assertIn("custom signal orientations", reason)
+        self.assertEqual({obj[1] for obj in sequence(self.world.components[101, "BASE_EDGE"].objects)}, {1001, 1101})
+
+    def test_signals_beyond_section_boundary_are_not_removed(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_edge(102, 20, 30, 500)
+        self.world.add_edge(103, 20, 40, 400)
+        self.world.add_signal(1001, 101)
+        self.world.add_signal(1101, 101, True)
+        self.world.add_signal(1201, 102)
+        self.world.add_signal(1202, 103, True)
+        plan = self.world.plan(1001)
+        proposal = self.world.network.proposal(plan).streetProposal
+        self.assertEqual(removals(plan), {1001})
+        self.assertEqual(sequence(proposal.edgesToRemove), [101])
+        self.assertEqual(set(sequence(proposal.edgeObjectsToRemove)), {1001})
+
+    def test_duplicate_references_request_native_removal_only_once(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101)
+        self.world.add_signal(1101, 101)
+        self.world.add_object(1101, 101, "signal")
+        proposal = self.world.network.proposal(self.world.plan(1001)).streetProposal
+        self.assertEqual(sequence(proposal.edgeObjectsToRemove), [1001, 1101])
+
+    def test_opposite_objects_are_retained_with_their_original_ids_and_settings(self):
+        self.world.add_edge(101, 10, 20, 1050)
+        self.world.add_signal(1001, 101, native_left=False)
+        self.world.add_signal(1101, 101, True, "one_way", fraction=0.999, native_left=True)
+        self.world.add_signal(1102, 101, True, "one_way", fraction=0.999, native_left=True)
+        original_first = self.world.components[1101, "EDGE_OBJECT"]
+        original_second = self.world.components[1102, "EDGE_OBJECT"]
+        plan = self.world.plan(1001)
+        self.assertEqual(removals(plan), {1001})
+        self.world.apply_plan(plan)
+        self.assertIs(self.world.components[1101, "EDGE_OBJECT"], original_first)
+        self.assertIs(self.world.components[1102, "EDGE_OBJECT"], original_second)
+        self.assertEqual(original_first.params.oneWay, 1)
+        self.assertEqual(original_second.params.oneWay, 1)
+
     def test_corridor_follows_the_whole_section_with_mixed_node_order(self):
         self.make_open_section()
         for seed in (101, 102, 103):
@@ -318,7 +495,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(layout(self.world.plan(1002)), expected)
         self.assertEqual(layout(self.world.plan(1003)), expected)
 
-    def test_reversing_the_chosen_direction_replaces_the_other_signals(self):
+    def test_reversing_the_chosen_direction_only_replaces_that_direction(self):
         self.make_open_section()
         self.world.add_signal(1001, 101, False)
         self.world.add_signal(1002, 102, False)
@@ -327,7 +504,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(removals(plan), {1002, 1003})
         self.assertEqual([step.left for step in sequence(plan.steps)], [True, False, True])
 
-    def test_proposal_preserves_reverse_signals_and_other_track_objects(self):
+    def test_proposal_replaces_same_direction_and_preserves_reverse_and_other_objects(self):
         self.world.add_edge(101, 10, 20, 700)
         self.world.add_signal(1001, 101, False, "one_way")
         self.world.add_signal(1002, 101, True)
@@ -446,12 +623,12 @@ class NetworkTests(unittest.TestCase):
     def test_no_space_or_excessive_signal_count_preserves_seed(self):
         self.world.add_edge(101, 10, 20, 2000)
         self.world.add_signal(1001, 101)
-        plan, reason = self.world.network.plan(1001, 1)
+        plan, reason = self.world.network.plan(1001, 1, self.world.source(1001))
         self.assertIsNone(plan)
         self.assertIn("count limit", reason)
         self.world.crossing_clearance = 3000
         self.world.add_road(9001, 10)
-        plan, reason = self.world.network.plan(1001, 300)
+        plan, reason = self.world.network.plan(1001, 300, self.world.source(1001))
         self.assertIsNone(plan)
         self.assertIn("no room", reason)
         self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
@@ -524,7 +701,7 @@ class NetworkTests(unittest.TestCase):
         segments, closed = self.world.network.corridor(101)
         self.assertTrue(closed)
         self.assertEqual(len(segments), 3)
-        plan, reason = self.world.network.plan(1001, 300)
+        plan, reason = self.world.network.plan(1001, 300, self.world.source(1001))
         self.assertIsNone(plan)
         self.assertIn("no forward endpoint", reason)
         self.assertEqual(self.world.components[101, "BASE_EDGE"].objects[1][1], 1001)
@@ -535,7 +712,7 @@ class NetworkTests(unittest.TestCase):
         self.world.add_signal(1001, 101)
         self.world.add_signal(1002, 102)
         for signal in (1001, 1002):
-            plan, reason = self.world.network.plan(signal, 300)
+            plan, reason = self.world.network.plan(signal, 300, self.world.source(signal))
             self.assertIsNone(plan)
             self.assertIn("no forward endpoint", reason)
 

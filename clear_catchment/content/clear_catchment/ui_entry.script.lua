@@ -50,7 +50,7 @@ end
 local entry = react.RegisterPluginRecipe(
   entryPoint.ModEntryPointExtension, "XinClearCatchmentEntry", function() return nil end
 )
-log.message("[Clear Catchment] Deeper existing-station colors and translucent fill loaded (revision 4, colorScale=0.65, fillAlpha=0.30).")
+log.message("[Clear Catchment] Deeper existing-station colors and stronger fill loaded (revision 6, colorScale=0.65, fillAlpha=0.80).")
 
 function data()
   return { entry = entry }

@@ -39,7 +39,7 @@ local function build(towns, streets)
   local types = api.type.ComponentType
   local entries, planned, aliases, townNames = {}, {}, {}, {}
   local entities, ownName = names.entities, names.ownName
-  local function add(entity, name, includeDisplayed)
+  local function add(entity, name, includeDisplayed, nativeTown, nativeTownName, nativeOwner)
     if not names.hasName(entity) then return end
     local before = ownName(entity)
     local readDisplay = not before and includeDisplayed or false
@@ -47,6 +47,8 @@ local function build(towns, streets)
     if before and name and before ~= name and not planned[entity] then
       entries[#entries + 1] = {
         entity = entity, before = before, after = name, attempts = 0, readDisplay = readDisplay,
+        nativeTown = nativeTown, nativeTownName = nativeTownName,
+        nativeOwner = nativeOwner,
       }
       planned[entity] = name
     end
@@ -120,28 +122,6 @@ end
 
 function M.build(towns, streets)
   return names.withScan(build, towns, streets)
-end
-
-function M.repairIndustries()
-  return names.withScan(function()
-    local entries, seen, aliases, townNames = {}, {}, {}, {}
-    for _, entity in ipairs(names.entities(api.type.ComponentType.TOWN)) do
-      local name = api.engine.util.getEntityName(entity)
-      townNames[entity] = name
-      if name then aliases[name] = name end
-    end
-    facilities.plan(aliases, townNames, function(entity, after)
-      if not names.hasName(entity) then return end
-      local own = names.ownName(entity)
-      local before = own or api.engine.util.getEntityName(entity)
-      if before and before ~= after and not seen[entity] then
-        entries[#entries + 1] = {entity = entity, before = before, after = after,
-          readDisplay = own == nil, attempts = 0}
-        seen[entity] = true
-      end
-    end, true)
-    return entries
-  end)
 end
 
 return M

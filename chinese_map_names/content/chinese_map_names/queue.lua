@@ -21,6 +21,8 @@ function M.prepare(entries)
   end
   for _, entry in ipairs(entries) do
     entry.dependencies = {}
+    if entry.nativeTown and byEntity[entry.nativeTown] then entry.dependencies[#entry.dependencies + 1] = entry.nativeTown end
+    if entry.nativeOwner and byEntity[entry.nativeOwner] then entry.dependencies[#entry.dependencies + 1] = entry.nativeOwner end
     if entry.readDisplay and not entry.done and api.engine.entityExists(entry.entity) then
       local sources = {}
       local stem = api.engine.util.getEntityNameStem(entry.entity)
