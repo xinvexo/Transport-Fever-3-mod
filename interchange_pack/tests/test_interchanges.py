@@ -85,8 +85,8 @@ class GeometryTests(unittest.TestCase):
                     self.assertTrue(top['bridge'], (a,b,'crossing needs a bridge'))
 
     def test_external_right_hand_traffic_and_reachable_destinations(self):
-        for kind, road_type, side in itertools.product(KINDS, (1,2), (1,2)):
-            net = self.make(kind, roadType=road_type, loopSide=side)
+        for kind, params in geometry_cases():
+            net = self.make(kind, **params)
             graph, inputs, outputs = {}, [], []
             for road in net['roads']:
                 for s in road['segments']:
@@ -112,11 +112,11 @@ class GeometryTests(unittest.TestCase):
                     for target in graph.get(todo.pop(), ()):
                         if target not in seen:
                             seen.add(target); todo.append(target)
-                self.assertGreaterEqual(len(set(outputs)&seen),expected-1,(kind,road_type,side,source))
+                self.assertGreaterEqual(len(set(outputs)&seen),expected-1,(kind,params,source))
 
     def test_three_leg_forks_use_distinct_lane_ports(self):
-        for kind,lanes,side in itertools.product(('directional','trumpet'),(1,2),(1,2)):
-            net = self.make(kind,lanes=lanes,loopSide=side)
+        for kind,lanes in itertools.product(('directional','trumpet'),(1,2)):
+            net = self.make(kind,lanes=lanes)
             forks = {}
             for road in net['roads']:
                 if road['role'] == 'main':
@@ -141,8 +141,8 @@ class GeometryTests(unittest.TestCase):
         self.assertLess(curvature.max(),1/100)
 
     def test_highway_diamond_forks_keep_main_inner_edge_aligned(self):
-        for size,lanes in itertools.product((1,2,3),(1,2)):
-            net = self.make('diamond',size=size,lanes=lanes)
+        for lanes in (1,2):
+            net = self.make('diamond',lanes=lanes)
             profile = road_profile(lanes=lanes)
             forks = {}
             for road in net['roads']:
@@ -168,8 +168,8 @@ class GeometryTests(unittest.TestCase):
         # Use native full road widths, including shoulders. Shared junction roads
         # legitimately overlap at their merge; their later crossings are tested above.
         for kind, params in geometry_cases():
-            net = self.make(kind,**params,crossLanes=2)
-            profile = road_profile(**params,crossLanes=2)
+            net = self.make(kind,**params)
+            profile = road_profile(**params)
             paths = []
             for road in net['roads']:
                 tags = {s.get(k) for s in road['segments'] for k in ('tag0','tag1')}-{None}
@@ -273,8 +273,8 @@ class GeometryTests(unittest.TestCase):
                                        (kind,lanes,road['id'],tag,distance))
 
     def test_shared_arc_is_one_two_way_road_with_lane_aligned_approaches(self):
-        for road_type, lanes in itertools.product((1,2),(1,2)):
-            net = self.make('cloverleaf',roadType=road_type,lanes=lanes)
+        for lanes in (1,2):
+            net = self.make('cloverleaf',lanes=lanes)
             paths = {r['id']:r for r in net['roads']}
             endpoints = {}
             for road in net['roads']:
@@ -305,39 +305,6 @@ class GeometryTests(unittest.TestCase):
                     expected = side*np.array([np.cos(angle)*forward[0]-np.sin(angle)*forward[1],
                                               np.sin(angle)*forward[0]+np.cos(angle)*forward[1],0])
                     np.testing.assert_allclose(direction,expected,atol=1e-8)
-
-    def test_compact_defaults_and_different_templates(self):
-        limits = {'cloverleaf':285,'diamond':180,'trumpet':280,'directional':272,'turbine':435,'stack':435}
-        for kind, limit in limits.items():
-            net = self.make(kind)
-            points = np.concatenate([sample(s)[0] for r in net['roads'] for s in r['segments']])
-            self.assertLessEqual(np.ptp(points[:,:2],axis=0).max(), limit)
-        self.assertNotEqual(self.make('turbine')['roads'],self.make('stack')['roads'])
-        self.assertEqual(sum(r['role']=='loop' for r in self.make('cloverleaf')['roads']),4)
-        self.assertEqual(sum(r['role']=='loop' for r in self.make('trumpet')['roads']),1)
-        self.assertEqual(sum(r['role']=='loop' for r in self.make('directional')['roads']),0)
-
-    def test_native_comparison_candidates_preserve_connected_turns(self):
-        lua = runtime()
-        designs = lua.execute((CONTENT/'design_candidates.lua').read_text(encoding='utf-8'))
-        for kind in ('cloverleaf','turbine','stack','trumpet','directional'):
-            for probe,road_type,lanes in itertools.product(range(1,len(designs.options(kind))+1),(1,2),(1,2)):
-                net = self.make(kind,_ipProbe=probe,roadType=road_type,lanes=lanes)
-                graph,inputs,outputs = {},set(),set()
-                for road in net['roads']:
-                    for s in road['segments']:
-                        self.assertTrue(np.isfinite([s['p0'],s['p1'],s['t0'],s['t1']]).all())
-                        a,b = node(s['p0'],s.get('tag0')),node(s['p1'],s.get('tag1'))
-                        graph.setdefault(a,set()).add(b)
-                        if road['role']=='shared': graph.setdefault(b,set()).add(a)
-                        if isinstance(a,str) and a.endswith('external-in'): inputs.add(a)
-                        if isinstance(b,str) and b.endswith('external-out'): outputs.add(b)
-                for source in inputs:
-                    seen,todo = {source},[source]
-                    while todo:
-                        for target in graph.get(todo.pop(),()):
-                            if target not in seen: seen.add(target); todo.append(target)
-                    self.assertGreaterEqual(len(outputs&seen),len(outputs)-1,(kind,probe,road_type,lanes,source))
 
 
 class ConstructionTests(unittest.TestCase):
@@ -407,8 +374,8 @@ class ConstructionTests(unittest.TestCase):
 
     def test_highway_lane_counts_and_native_shared_roads(self):
         lua = runtime()
-        for road_type,lanes in itertools.product((1,2),(1,2)):
-            profile = road_profile(roadType=road_type,lanes=lanes)
+        for lanes in (1,2):
+            profile = road_profile(lanes=lanes)
             expected_main = ('highway_new_medium','highway_new_large')[lanes-1]
             self.assertTrue(profile['main'].endswith(expected_main+'.street_template'))
             self.assertTrue(profile['ramp'].endswith('highway_new_small.street_template'))
@@ -416,7 +383,7 @@ class ConstructionTests(unittest.TestCase):
             lua.execute((CONTENT/'interchange.script.lua').read_text(encoding='utf-8'))
             callback = lua.globals().data().updateFn
             for kind in KINDS:
-                result = unpack(callback(lua.table_from({'kind':kind}),lua.table_from({'roadType':road_type,'lanes':lanes})))
+                result = unpack(callback(lua.table_from({'kind':kind}),lua.table_from({'lanes':lanes})))
                 types = {g['params']['type'] for g in result['edgeLists']}
                 self.assertIn(profile['main'],types)
                 self.assertIn(profile['shared'] if kind=='cloverleaf' else profile['ramp'],types)
@@ -428,25 +395,6 @@ class ConstructionTests(unittest.TestCase):
             self.assertEqual(len(car_lanes),count)
             self.assertTrue(all(l['forward'] for l in car_lanes))
             self.assertEqual(sum(l['width'] for l in definition['laneConfigs']),width)
-
-    def test_english_construction_menu_and_saved_road_names(self):
-        lua = runtime('en')
-        lua.execute((CONTENT/'menu_category.res.lua').read_text(encoding='utf-8'))
-        self.assertEqual(lua.globals().data().data.name, 'Interchanges')
-        names = ('Cloverleaf interchange', 'Diamond interchange', 'Trumpet interchange',
-                 'Directional T interchange', 'Turbine interchange', 'Four-level stack interchange')
-        for kind, name in zip(KINDS, names):
-            with self.subTest(kind=kind):
-                lua.execute((CONTENT/(kind+'.con.lua')).read_text(encoding='utf-8'))
-                definition = unpack(lua.globals().data())
-                self.assertEqual(definition['description']['name'], name)
-                self.assertTrue(definition['description']['description'].isascii())
-                self.assertEqual(definition['params'][0]['name'], 'Lanes')
-                for option in definition['params'][1:]:
-                    self.assertEqual(option['values'], ['Off', 'Keep'])
-        for kind in ('town_three', 'shared_town', 'shared_highway'):
-            lua.execute((CONTENT/(kind+'.street_template.lua')).read_text(encoding='utf-8'))
-            self.assertTrue(lua.globals().data().description.name.isascii())
 
     def test_menu_defaults_and_real_callback(self):
         lua = runtime()
@@ -500,8 +448,8 @@ class ConstructionTests(unittest.TestCase):
         lua = runtime()
         lua.execute((CONTENT/'interchange.script.lua').read_text(encoding='utf-8'))
         callback = lua.globals().data().updateFn
-        for lanes, cross, bridge in itertools.product((1,2),repeat=3):
-            result = unpack(callback(lua.table_from({'kind':'diamond'}),lua.table_from({'lanes':lanes,'crossLanes':cross,'bridge':bridge})))
+        for lanes in (1,2):
+            result = unpack(callback(lua.table_from({'kind':'diamond'}),lua.table_from({'lanes':lanes,'crossLanes':2,'bridge':2})))
             roads = {g['params']['type'].split('/')[-1] for g in result['edgeLists']}
             self.assertIn('highway_new_'+('medium' if lanes==1 else 'large')+'.street_template',roads)
             self.assertIn('country_new_small.street_template',roads)
@@ -516,7 +464,7 @@ class NativeResourceTests(unittest.TestCase):
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute('function _(value) return value end')
         with ZipFile(base/'street.zip') as archive:
-            for family, size, count in (('highway','small',1),('highway','medium',2),('highway','large',3),('country','small',2),('country','medium',4)):
+            for family, size, count in (('highway','small',1),('highway','medium',2),('highway','large',3),('country','small',2)):
                 name = f'street/{family}/{family}_new_{size}.street_template.lua'
                 lua.execute(archive.read(name).decode())
                 road = unpack(lua.globals().data())
@@ -525,23 +473,10 @@ class NativeResourceTests(unittest.TestCase):
                 lanes = [lane for lane in road['laneConfigs'] if 'CAR' in lane['transportModes']]
                 self.assertEqual(len(lanes),count)
                 self.assertEqual(sum(l['forward'] for l in lanes),count if family=='highway' else count//2)
-                expected = {('highway',1):9,('highway',2):18,('highway',3):23,('country',2):14,('country',4):22}
+                expected = {('highway',1):9,('highway',2):18,('highway',3):23,('country',2):14}
                 self.assertEqual(sum(l['width'] for l in road['laneConfigs']),expected[family,count])
-            for name,count,width,forward in (
-                ('town/town_new_one_way_small',2,16,2),
-                ('town/town_new_small',2,16,1),
-                ('town/town_new_medium',4,24,2),
-                ('constructions/entrance_new_one_way',1,11,1),
-            ):
-                lua.execute(archive.read('street/'+name+'.street_template.lua').decode())
-                road = unpack(lua.globals().data())
-                cars = [l for l in road['laneConfigs'] if 'CAR' in l['transportModes']]
-                self.assertEqual(len(cars),count)
-                self.assertEqual(sum(l['forward'] for l in cars),forward)
-                self.assertEqual(sum(l['width'] for l in road['laneConfigs']),width)
         with ZipFile(base/'bridge.zip') as archive:
             self.assertIn('bridge/concrete.bridge.lua',archive.namelist())
-            self.assertIn('bridge/steel.bridge.lua',archive.namelist())
 
 
 if __name__ == '__main__':

@@ -33,8 +33,8 @@ class NativeStationRowsTests(unittest.TestCase):
                 }
             end
             engineState, guiState = state(), state()
-            components, commands, originals, sent = {}, {}, {}, {}
-            commandQueue, guiCallbacks, emitted, warnings = {}, {}, {}, {}
+            components, commands, originals = {}, {}, {}
+            commandQueue, guiCallbacks, warnings = {}, {}, {}
             inputActions, reactEvents = {}, {}
             lane, shift = 'gui', false
             builtin = {ConstructionAction = function(params)
@@ -91,7 +91,6 @@ class NativeStationRowsTests(unittest.TestCase):
                     fireReactEvent = function(name, ...)
                         assert(lane == 'gui', 'React events belong to the GUI lane')
                         local payload = {...}
-                        emitted[#emitted + 1] = {name = name, payload = copy(payload)}
                         if name == 'setModuleBuilderEntity' then
                             menuTarget = payload[1]
                             local builder = uiParams.moduleBuilder or uiParams.moduleBulldozer
@@ -119,7 +118,6 @@ class NativeStationRowsTests(unittest.TestCase):
                     end,
                     sendCommand = function(command, callback)
                         assert(not callback or lane == 'gui', 'engine cannot receive command callbacks')
-                        sent[#sent + 1] = command
                         commandQueue[#commandQueue + 1] = {command = command, callback = callback}
                         if command.kind == 'world' and not command.native then
                             local index = #commands + 1
@@ -169,7 +167,6 @@ class NativeStationRowsTests(unittest.TestCase):
                 shift = false
                 inputActions.IA_PRECISION_MODE.callback({status = 'EndReleased'})
             end
-            function guiStep() end
             function nativeEdit(changes)
                 local params = copy(components[currentEntity].CONSTRUCTION.params)
                 for id, name in pairs(changes) do params.modules[id] = name and module(name) or nil end
@@ -215,7 +212,6 @@ class NativeStationRowsTests(unittest.TestCase):
                     end
                 end
                 lane = 'gui'
-                return command.kind
             end
             function flushScripts()
                 while commandQueue[1] and commandQueue[1].command.kind == 'script' do executeNext() end
@@ -247,7 +243,7 @@ class NativeStationRowsTests(unittest.TestCase):
         self.lua.execute((CONTENT / "events.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("handlers = data(); lane = 'engine'; handlers.update(nil, engineState); lane = 'gui'; claim()")
         self.lua.execute((CONTENT / "ui_entry.script.lua").read_text(encoding="utf-8"))
-        self.lua.execute("data().entry(); flushScripts(); sent = {}; renderNative()")
+        self.lua.execute("data().entry(); flushScripts(); renderNative()")
         self.lua.execute("sequence = modules['xin_station_rows_1::/station_rows/sequence.lua']")
 
     def start_native_addition(self):
@@ -264,19 +260,10 @@ class NativeStationRowsTests(unittest.TestCase):
             "stationRowsTarget", "stationRowsFinished", "onPostBuildProposal",
         })
 
-    def test_native_action_and_shift_target_sync_only_on_changes(self):
+    def test_shift_snapshot_precedes_native_edit_and_release_keeps_job(self):
         self.assertEqual(self.lua.eval("node.kind"), "NativeAction")
         self.assertTrue(self.lua.eval("node.params == uiParams"))
-        self.lua.execute("press(); guiStep(); renderNative(); guiStep()")
-        self.assertEqual(self.lua.eval("#sent"), 1)
-        self.assertEqual(self.lua.eval("sent[1].name"), "stationRowsTarget")
-        self.assertEqual(self.lua.eval("sent[1].params.entity"), 10)
-        self.lua.execute("release(); guiStep()")
-        self.assertEqual(self.lua.eval("#sent"), 2)
-        self.assertIsNone(self.lua.eval("sent[2].params.entity"))
-
-    def test_shift_snapshot_precedes_native_edit_and_release_keeps_job(self):
-        self.lua.execute("press(); nativeEdit({[6398000] = 'cargo.module'}); release()")
+        self.lua.execute("press(); renderNative(); nativeEdit({[6398000] = 'cargo.module'}); release()")
         self.assertEqual(self.lua.eval("commandQueue[1].command.name"), "stationRowsTarget")
         self.assertEqual(self.lua.eval("commandQueue[2].command.kind"), "world")
         self.assertIsNone(self.lua.eval("commandQueue[3].command.params.entity"))
@@ -314,7 +301,7 @@ class NativeStationRowsTests(unittest.TestCase):
                 [8400000] = module('rail.module'), [7401000] = module('passenger.module'),
             }
             press(); nativeEdit({[6398000] = 'cargo.module'}); executeNext(); executeNext()
-            runCallbacks(); claim(); guiStep()
+            runCallbacks(); claim()
         """)
         self.assertEqual(self.lua.eval("#engineState.value.job.steps"), 0)
         self.assertEqual(self.lua.eval("uiParams.moduleBuilder.constructionEntity"), 11)
@@ -326,27 +313,6 @@ class NativeStationRowsTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("uiParams.moduleBuilder.constructionEntity"), 12)
         self.assertEqual(self.lua.eval("guiState.value.done"), 2)
         self.assertEqual(self.lua.eval("#commands"), 0)
-
-    def test_finished_sequence_rearms_for_next_operation_on_same_station(self):
-        self.start_native_addition()
-        for _ in range(3):
-            self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
-        self.assertEqual(self.lua.eval("uiParams.moduleBuilder.constructionEntity"), 14)
-        self.lua.execute("""
-            local slots = components[14].CONSTRUCTION.slots
-            for j = -2, 1 do slots[#slots + 1] = {id = 6396000 + 10 * j, type = 'cargo_platform'} end
-            press(); nativeEdit({[6396000] = 'cargo.module'}); release()
-            executeNext(); executeNext(); flushScripts(); runCallbacks(); claim(); flushScripts()
-        """)
-        self.assertEqual(self.lua.eval("engineState.value.job.sourceEntity"), 14)
-        self.assertEqual(self.lua.eval("engineState.value.job.id"), 2)
-        self.assertEqual(self.lua.eval("changedSlots(4)[1]"), 6395990)
-        for _ in range(3):
-            self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
-        self.assertEqual(self.lua.eval("#commands"), 6)
-        self.assertEqual(self.lua.eval("currentEntity"), 18)
-        self.assertEqual(self.lua.eval("uiParams.moduleBuilder.constructionEntity"), 18)
-        self.assertFalse(self.lua.eval("engineState.value.busy"))
 
     def test_native_failure_or_ordinary_click_does_not_start_continuation(self):
         for tracked, success in ((True, False), (False, True)):
@@ -423,26 +389,34 @@ class NativeStationRowsTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("engineState.value.target.entity"), 10)
         self.assertIsNone(self.lua.eval("engineState.value.target.module"))
 
-    def test_held_modifier_rearms_after_completion_without_another_key_event(self):
-        self.lua.execute("""
-            press(); nativeEdit({[6398000] = 'cargo.module'})
-            executeNext(); executeNext(); runCallbacks(); claim(); flushScripts()
-        """)
-        for _ in range(3):
-            self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
-        self.assertFalse(self.lua.eval("sequence.running()"))
-        self.assertEqual(self.lua.eval("engineState.value.target.entity"), 14)
-        self.assertEqual(self.lua.eval("engineState.value.target.module"), "cargo.module")
-        self.lua.execute("""
-            for j = -2, 1 do
-                local slots = components[14].CONSTRUCTION.slots
-                slots[#slots + 1] = {id = 6396000 + 10 * j, type = 'cargo_platform'}
-            end
-            nativeEdit({[6396000] = 'cargo.module'})
-            executeNext(); runCallbacks(); claim(); flushScripts()
-        """)
-        self.assertEqual(self.lua.eval("#commands"), 4)
-        self.assertEqual(self.lua.eval("engineState.value.job.id"), 2)
+    def test_next_row_works_with_held_or_repressed_modifier(self):
+        for repressed in (False, True):
+            with self.subTest(repressed=repressed):
+                self.setUp()
+                self.lua.execute("""
+                    press(); nativeEdit({[6398000] = 'cargo.module'})
+                    executeNext(); executeNext(); runCallbacks(); claim(); flushScripts()
+                """)
+                for _ in range(3):
+                    self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
+                self.assertEqual(self.lua.eval("engineState.value.target.entity"), 14)
+                if repressed:
+                    self.lua.execute("release(); flushScripts(); press(); flushScripts()")
+                self.lua.execute("""
+                    local slots = components[14].CONSTRUCTION.slots
+                    for j = -2, 1 do
+                        slots[#slots + 1] = {id = 6396000 + 10 * j, type = 'cargo_platform'}
+                    end
+                    nativeEdit({[6396000] = 'cargo.module'})
+                    executeNext(); runCallbacks(); claim(); flushScripts()
+                """)
+                self.assertEqual(self.lua.eval("engineState.value.job.id"), 2)
+                for _ in range(3):
+                    self.lua.execute("executeNext(); runCallbacks(); flushScripts()")
+                self.assertEqual(self.lua.eval("#commands"), 6)
+                self.assertEqual(self.lua.eval("menuTarget"), 18)
+                self.assertFalse(self.lua.eval("sequence.running()"))
+                self.assertFalse(self.lua.eval("engineState.value.busy"))
 
     def test_new_gui_mount_clears_saved_pending_work(self):
         self.lua.execute("""

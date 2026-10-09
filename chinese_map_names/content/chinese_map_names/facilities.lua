@@ -35,7 +35,7 @@ end
 -- The native collision set consists of station-group names and the parent
 -- construction names of depots. Counts let an existing owner be temporarily
 -- excluded while applying the creation rule to its replacement name.
-function M.plan(_, townNames, add)
+function M.plan(townNames, add)
   local types = api.type.ComponentType
   local byOwner, occupied, caches = {}, {}, {}
   local function count(name, delta)

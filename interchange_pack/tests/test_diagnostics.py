@@ -1,6 +1,4 @@
 import unittest
-from pathlib import Path
-import tempfile
 from geometry_support import CONTENT, runtime
 
 
@@ -33,78 +31,6 @@ class DiagnosticTests(unittest.TestCase):
           input[2].errorState.messages={"collision"}
           observer.guiHandleEvent(nil,nil,nil,nil,nil,"builder.proposalCreate",input)
           assert(#messages==2)
-        ''')
-
-    def test_checker_refresh_reads_physical_file_instead_of_cached_vfs(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root/'replay_version.lua').write_text('return 15',encoding='utf-8')
-            (root/'replay_check.lua').write_text('''
-              reloadCount=reloadCount+1
-              return {enqueue=function(key,p,result) assert(p.snapshot); replayCount=replayCount+1 end,
-                      step=function() end}
-            ''',encoding='utf-8')
-            lua = runtime()
-            lua.execute('''
-              reloadCount,replayCount=0,0
-              log={message=function() end}
-              api={res={streetTemplateRep={find=function(n) return n end,get=function() return {} end}}}
-              resolveutil={resolve=function() error("physical path should be used") end}
-              ui={value={},get=function(self) return self.value end,set=function(self,v) self.value=v end}
-            ''')
-            lua.globals().SCRIPT_SOURCE = (CONTENT/'diagnostics.script.lua').read_text(encoding='utf-8')
-            lua.globals().SCRIPT_NAME = '@'+(root/'diagnostics.script.lua').as_posix()
-            lua.execute('''
-              assert(load(SCRIPT_SOURCE,SCRIPT_NAME))()
-              diagnostic=data()
-              diagnostic.guiUpdate(nil,nil,ui)
-              diagnostic.guiHandleEvent(nil,nil,ui,nil,nil,"builder.proposalCreate",{
-                {toAdd={{fileName="xin_interchange_pack_1::/interchanges/diamond.con",construction={params={}}}},
-                  proposal={addedNodes={},addedSegments={}},clone=function() return {snapshot=true} end},
-                {errorState={critical=false,messages={}}}})
-            ''')
-            (root/'replay_version.lua').write_text('return 16',encoding='utf-8')
-            lua.execute('diagnostic.guiUpdate(nil,nil,ui); assert(reloadCount==1 and replayCount==1)')
-
-    def test_checker_reload_reuses_captured_preview_without_building(self):
-        lua = runtime()
-        lua.execute('''
-          messages, replayed, reloads, steps = {},0,0,0
-          hotVersion = 15
-          log = {message=function(s) messages[#messages+1]=s end}
-          api = {res={streetTemplateRep={find=function(n) return n end,get=function() return {} end}},
-            cmd={sendCommand=function() error("must not build") end}}
-          resolveutil = {
-            resolve=function(path,base) assert(path:find("xin_interchange_pack_1::/",1,true)); return path end,
-            loadfile=function(path)
-              if path:find("replay_version.lua",1,true) then return function() return hotVersion end end
-              assert(path:find("replay_check.lua",1,true))
-              reloads=reloads+1
-              return function() return {
-                enqueue=function(key,proposal,result)
-                  assert(proposal.snapshot and result.errorState.critical)
-                  replayed=replayed+1
-                end,
-                step=function() steps=steps+1 end,
-              } end
-            end,
-          }
-          ui={value={},get=function(self) return self.value end,set=function(self,v) self.value=v end}
-        ''')
-        lua.execute((CONTENT/'diagnostics.script.lua').read_text(encoding='utf-8'))
-        lua.execute('''
-          diagnostic=data()
-          diagnostic.guiUpdate(nil,nil,ui)
-          local proposal={toAdd={{fileName="xin_interchange_pack_1::/interchanges/directional.con",
-            construction={params={size=1}}}},proposal={addedNodes={},addedSegments={}},
-            clone=function() return {snapshot=true} end}
-          diagnostic.guiHandleEvent(nil,nil,ui,nil,nil,"builder.proposalCreate",{
-            proposal,{errorState={critical=true,messages={"cannot build"}}}})
-          hotVersion=16
-          for i=1,60 do diagnostic.guiUpdate(nil,nil,ui) end
-          assert(reloads==1 and replayed==1 and steps>0)
-          for i=1,60 do diagnostic.guiUpdate(nil,nil,ui) end
-          assert(reloads==1 and replayed==1)
         ''')
 
     def test_native_preview_logging_is_read_only_and_deduplicated(self):

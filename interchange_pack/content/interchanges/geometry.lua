@@ -212,7 +212,7 @@ local function archBridge(path, height, drop)
 end
 
 local function flyover(net, r, height, turbine, archDrop)
-  local a, c, d = net.a, net.c, net.d
+  local a, c = net.a, net.c
   local path = road(net, "left-" .. arm(r), arm(r), arm(r-1), "left")
   local offset = net.rampOffset
   local p0, p1 = vec(-a,-armOffset(net,r)), vec(-c,-offset,height)
@@ -235,35 +235,26 @@ end
 
 local function diamond(net, params)
   local j, h, a, d = 45*net.scale, net.h, net.a, net.d
-  local nativeHighway = params.roadType ~= 2
-  if nativeHighway then
-    local profile = roads.select(params)
-    local offset = (profile.connectorWidth-profile.mainWidth)/2
-    for _,r in ipairs({0,2}) do
-      local inlet = road(net,"main-in-"..arm(r),arm(r),nil,"main")
-      inlet.profile = "connector"
-      straight(inlet,vec(-net.l,-d),vec(-a,-d),tag(r,"external-in"),tag(r,"in"))
-      local center = road(net,"main-"..arm(r),arm(r),arm(r+2),"main")
-      straight(center,vec(-a,-d+offset),vec(a,-d+offset),tag(r,"in"),tag(r,"out"))
-      local outlet = road(net,"main-out-"..arm(r),nil,arm(r+2),"main")
-      outlet.profile = "connector"
-      straight(outlet,vec(a,-d),vec(net.l,-d),tag(r,"out"),tag(r,"external-out"))
-      rotateRoad(inlet,r); rotateRoad(center,r); rotateRoad(outlet,r)
-    end
-    -- Match the lane-aligned ports used by the native highway diamond.
-    d = d+4
-  else
-    mainline(net,0,0)
-    mainline(net,2,0)
+  local profile = roads.select(params)
+  local offset = (profile.connectorWidth-profile.mainWidth)/2
+  for _,r in ipairs({0,2}) do
+    local inlet = road(net,"main-in-"..arm(r),arm(r),nil,"main")
+    inlet.profile = "connector"
+    straight(inlet,vec(-net.l,-d),vec(-a,-d),tag(r,"external-in"),tag(r,"in"))
+    local center = road(net,"main-"..arm(r),arm(r),arm(r+2),"main")
+    straight(center,vec(-a,-d+offset),vec(a,-d+offset),tag(r,"in"),tag(r,"out"))
+    local outlet = road(net,"main-out-"..arm(r),nil,arm(r+2),"main")
+    outlet.profile = "connector"
+    straight(outlet,vec(a,-d),vec(net.l,-d),tag(r,"out"),tag(r,"external-out"))
+    rotateRoad(inlet,r); rotateRoad(center,r); rotateRoad(outlet,r)
   end
-  local elevated = params.crossApproach ~= 2
-  local l = elevated and 80*net.scale or j+8*h
-  local endHeight = elevated and h or 0
-  net.crossL = l
+  -- Match the lane-aligned ports used by the native highway diamond.
+  d = d+4
+  local l = 80*net.scale
   local cross = road(net, "cross", "S", "N", "cross")
-  straight(cross, vec(0,-l,endHeight), vec(0,-j,h), "cross:external-S", "cross:S", elevated)
+  straight(cross, vec(0,-l,h), vec(0,-j,h), "cross:external-S", "cross:S", true)
   straight(cross, vec(0,-j,h), vec(0,j,h), "cross:S", "cross:N", true)
-  straight(cross, vec(0,j,h), vec(0,l,endHeight), "cross:N", "cross:external-N", elevated)
+  straight(cross, vec(0,j,h), vec(0,l,h), "cross:N", "cross:external-N", true)
   local specs = {
     { "ramp4", vec(-a,-d), vec(0,-j,h), vec(1,0), "W:in", "cross:S", "W", "cross:S" },
     { "ramp3", vec(0,-j,h), vec(a,-d), vec(1,0), "cross:S", "W:out", "cross:S", "E" },
@@ -274,30 +265,11 @@ local function diamond(net, params)
     if enabled(params,"ramp",s[1]:sub(-1)) then
       local path = road(net, s[1], s[7], s[8], "diamond")
       curve(path, s[2], s[3], s[4], s[4], s[5], s[6])
-      if nativeHighway then
-        local ramp = path.segments[1]
-        local dx,dy,dz = s[3][1]-s[2][1],s[3][2]-s[2][2],s[3][3]-s[2][3]
-        local chord = math.sqrt(dx*dx+dy*dy+dz*dz)
-        ramp.t0,ramp.t1 = mul(s[4],chord),mul(s[4],chord)
-      end
+      local ramp = path.segments[1]
+      local dx,dy,dz = s[3][1]-s[2][1],s[3][2]-s[2][2],s[3][3]-s[2][3]
+      local chord = math.sqrt(dx*dx+dy*dy+dz*dz)
+      ramp.t0,ramp.t1 = mul(s[4],chord),mul(s[4],chord)
     end
-  end
-end
-
-local function reflectTraffic(net)
-  -- Reflection alone changes driving side. Reverse the entire directed graph too.
-  local reflected = { W = "E", E = "W", S = "S", N = "N" }
-  for _, path in ipairs(net.roads) do
-    path.from, path.to = reflected[path.to], reflected[path.from]
-    local reversed = {}
-    for i = #path.segments, 1, -1 do
-      local s = path.segments[i]
-      local function point(p) return vec(-p[1],p[2],p[3]) end
-      local function tangent(t) return vec(t[1],-t[2],-t[3]) end
-      reversed[#reversed+1] = { p0=point(s.p1), p1=point(s.p0),
-        t0=tangent(s.t1), t1=tangent(s.t0), tag0=s.tag1, tag1=s.tag0, bridge=s.bridge }
-    end
-    path.segments = reversed
   end
 end
 
@@ -388,23 +360,22 @@ function M.generate(kind, params)
     elseif kind=="stack" or kind=="turbine" then design={wideMedian=true,mergeAngle=30,rightAngle=35,
       stagger=({24,32,40,48})[acceptance+1]} end
   end
-  local sizes = { 1, 1.2, 1.4 }
-  local scale, h = sizes[params.size or 1] or 1, design.height or 8
+  local scale, h = 1, design.height or 8
   local profile = roads.select(params)
   local net = { roads = {}, scale = scale, h = h, design=design, stagger=(design.stagger or 0)*scale,
     d = profile.mainWidth/2+3, b = 48*scale, a = 270*scale,
-    c = 35*scale, rampOffset = (profile.rampWidth+3)/2, sharedWidth = profile.sharedWidth }
+    c = 35*scale, rampOffset = (profile.rampWidth+3)/2 }
   if kind=="directional" or kind=="trumpet" then
     net.d = profile.mainWidth/2+profile.rampWidth+2.5
     net.branchD = profile.branchWidth/2+profile.rampWidth+2.5
   elseif kind=="stack" or kind=="turbine" then
     net.d = profile.mainWidth/2+profile.rampWidth*(design.wideMedian and 2 or 1)+(design.wideMedian and 3 or 2.5)
   end
-  local shared = kind == "cloverleaf" and params.cloverLayout ~= 2
+  local shared = kind == "cloverleaf"
   if shared and params.lanes==2 then net.b=56*scale end
   if kind=="trumpet" and params.lanes==2 then net.b=({64,68,72,76})[acceptance+1]*scale end
   if shared then net.a = net.b+(net.b-net.d)+math.max(40*scale,5.5*h) end
-  if kind == "diamond" then net.a, net.b = math.max(70*scale,8.75*h), 32*scale end
+  if kind == "diamond" then net.b = 32*scale end
   if kind == "directional" or kind == "trumpet" then net.a = math.max(110*scale, net.c+(design.approach or 12)*h) end
   if kind == "stack" or kind == "turbine" then
     net.c = kind == "stack" and 45*scale or math.max(60*scale,profile.rampWidth/0.17+5)
@@ -413,10 +384,9 @@ function M.generate(kind, params)
   end
   local terminal = kind=="cloverleaf" and params.lanes~=2 and 12 or (params.lanes==2 and 25 or 20)
   net.l = net.a+net.stagger+terminal*scale
-  if kind=="diamond" and params.roadType~=2 then
-    local size = params.size or 1
+  if kind=="diamond" then
     net.d = 13.5
-    net.a = (params.lanes==2 and 75 or 70)+10*(size-1)
+    net.a = params.lanes==2 and 75 or 70
     net.l = net.a+(params.lanes==2 and 25 or 20)
   end
   if kind == "diamond" then
@@ -425,17 +395,10 @@ function M.generate(kind, params)
     local leaves = { 3, 2, 1, 4 }
     for r = 0, 3 do
       mainline(net, r, r % 2 == 0 and 0 or h)
-      if shared then
-        if enabled(params,"leaf",leaves[r+1]) then
-          sharedLeaf(net, r)
-        else
-          rightTurn(net, r+1)
-        end
+      if enabled(params,"leaf",leaves[r+1]) then
+        sharedLeaf(net, r)
       else
-        rightTurn(net, r)
-      end
-      if not shared and enabled(params,"leaf",leaves[r+1]) then
-        loop(net, r, r % 2 == 0 and 0 or h, r % 2 == 0 and h or 0, tag(r,"after"), tag(r+1,"before"))
+        rightTurn(net, r+1)
       end
     end
   elseif kind == "stack" or kind == "turbine" then
@@ -463,7 +426,6 @@ function M.generate(kind, params)
       local stem = road(net, "trumpet-stem", nil, nil, "left")
       curve(stem,vec(-net.d,net.b,h/2),vec(-net.branchD,-net.b,h/2),vec(0,-1),vec(0,-1),"trumpet:top","trumpet:bottom",true)
       straight(stem,vec(-net.branchD,-net.b,h/2),vec(-net.branchD,-net.a),"trumpet:bottom",tag(3,"out"))
-      if params.loopSide == 2 then reflectTraffic(net) end
     end
   else
     error("Unknown interchange: " .. tostring(kind))

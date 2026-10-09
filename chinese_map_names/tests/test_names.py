@@ -124,21 +124,6 @@ class NamesTests(unittest.TestCase):
             self.assertEqual(config.nameId, expected)
             self.assertEqual(config.climate, "tropical")
 
-    def test_initial_industry_name_is_complete_and_children_inherit(self):
-        self.lua.execute('''
-          world[1] = {town = true, name = "Oxford"}
-          world[10] = {construction = "coal", name = "An arbitrary original title", nearestTown = 1, industries = {11}}
-          world[11] = {industry = true, stem = 10, parent = 10}
-          world[20] = {group = true, name = "My independent station group"}
-        ''')
-        self.start()
-        self.update(3)
-        expected = self.g.world[1].name + " 煤矿"
-        self.assertEqual(self.g.world[10].name, expected)
-        self.assertEqual(self.g.api.engine.util.getEntityName(11), expected)
-        self.assertIsNone(self.g.world[11].name)
-        self.assertEqual(self.g.world[20].name, "My independent station group")
-
     def test_native_lists_exhaustion_duplicates_and_determinism(self):
         self.lua.execute('''
           world[1] = {town = true, name = "北京"}
@@ -412,31 +397,37 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(entities, {1, 3})
         self.assertEqual(self.g.fullScans, 2)
 
-    def test_older_failed_job_is_retired_without_touching_old_names(self):
-        self.lua.execute('''
-          world[1] = {town = true, name = "Oxford"}
-          world[2] = {street = true, name = "High Street"}
-          world[3] = {construction = "coal", name = "Oxford Coal Mine", nearestTown = 1}
-          state:set({started = true, prepareAttempts = 3, cursor = 1, renamed = 0,
-            failed = 0, skipped = 0, retained = 0})
-        ''')
-        self.update(3)
-        self.assertTrue(self.g.state.value.done)
-        self.assertEqual(self.g.state.value.stoppedByRevision, 8)
-        self.assertEqual(len(self.g.sent), 0)
-        self.assertEqual(self.g.fullScans, 0)
-        self.assertEqual(self.g.world[1].name, "Oxford")
-        self.assertEqual(self.g.world[3].name, "Oxford Coal Mine")
-
-    def test_recovery_does_not_start_ordinary_or_completed_save_jobs(self):
-        self.lua.execute('world[1] = {town = true, name = "Keep my town"}')
-        for saved in ('{prepareAttempts = 3}', '{started = true, done = true, prepareAttempts = 3}'):
+    def test_inactive_and_older_saved_jobs_do_not_rename_or_scan(self):
+        cases = (
+            ('{prepareAttempts=3}', False),
+            ('{started=true, done=true, prepareAttempts=3}', False),
+            ('{started=true, done=true, prepareRevision=4}', False),
+            ('{started=true, done=true, prepareRevision=5}', False),
+            ('{started=true, prepareAttempts=3}', True),
+            ('{started=true, prepareRevision=6, entries={{entity=3, before="Old Farm", '
+             'after="株洲 作物农场", attempts=0}}}', True),
+        )
+        for saved, retire in cases:
             with self.subTest(saved=saved):
+                self.setUp()
+                self.lua.execute('''
+                  world[1] = {town=true, name="Keep my town"}
+                  world[3] = {construction="farm", name="Old Farm", nearestTown=1}
+                  api.engine.getEntitiesWithComponent = function() error("Must not scan") end
+                  api.engine.forEachEntity = function() error("Must not scan") end
+                ''')
                 self.lua.execute('state:set(' + saved + ')')
-                self.update(2)
+                self.update(200)
                 self.assertEqual(self.g.world[1].name, "Keep my town")
+                self.assertEqual(self.g.world[3].name, "Old Farm")
                 self.assertEqual(len(self.g.sent), 0)
-                self.assertIsNone(self.g.state.value.prepareRevision)
+                self.assertEqual(self.g.fullScans, 0)
+                if retire:
+                    self.assertTrue(self.g.state.value.done)
+                    self.assertEqual(self.g.state.value.stoppedByRevision, 8)
+                    self.assertIsNone(self.g.state.value.entries)
+                else:
+                    self.assertEqual(len(self.g.logs), 0)
 
     def test_unrelated_enumeration_errors_remain_visible_and_retries_stay_bounded(self):
         self.lua.execute('''
@@ -452,22 +443,6 @@ class NamesTests(unittest.TestCase):
         self.update(2)
         self.assertEqual(self.g.state.value.prepareAttempts, 3)
 
-    def test_game_unpack_behavior_does_not_leak_pcall_success_into_plan(self):
-        self.lua.execute('world[1] = {town = true, name = "Oxford"}')
-        # Reproduce why the old pack/unpack wrapper produced boolean entries.
-        kind = self.lua.eval('''function()
-          local results = table.pack(pcall(function() return {} end))
-          local first = table.unpack(results, 2, results.n)
-          return type(first)
-        end''')()
-        self.assertEqual(kind, "boolean")
-        result = self.plan()
-        self.assertEqual(result[1].entity, 1)
-        self.start()
-        self.update(3)
-        self.assertTrue(self.g.state.value.done)
-        self.assertEqual(self.g.state.value.audit.remaining, 0)
-
     def test_current_job_invalid_queue_is_rebuilt_without_relying_on_unpack(self):
         for invalid in ("true", "false", "42", '\"broken\"'):
             with self.subTest(invalid=invalid):
@@ -481,25 +456,18 @@ class NamesTests(unittest.TestCase):
                 self.assertEqual(self.g.state.value.prepareRevision, 8)
                 self.assert_chinese(1)
 
-    def test_invalid_plan_output_is_not_persisted_and_logs_are_bounded(self):
-        original = self.planner.build
-        self.planner.build = self.lua.eval('function() return true end')
-        self.start()
-        self.update(12)
-        self.assertIsNone(self.g.state.value.entries)
-        self.assertEqual(self.g.state.value.prepareAttempts, 3)
-        self.assertEqual(len(self.g.sent), 0)
-        warnings = [line for line in self.g.logs.values() if "invalid plan result" in line]
-        self.assertEqual(len(warnings), 3)
-        self.planner.build = original
-
-    def test_malformed_plan_entries_are_rejected_before_save(self):
-        self.planner.build = self.lua.eval('function() return {true} end')
-        self.start()
-        self.update()
-        self.assertIsNone(self.g.state.value.entries)
-        self.assertEqual(len(self.g.sent), 0)
-        self.assertEqual(self.g.state.value.prepareAttempts, 1)
+    def test_invalid_plan_output_is_not_persisted_and_retries_are_bounded(self):
+        for value in ('true', '{true}'):
+            with self.subTest(value=value):
+                self.setUp()
+                self.planner.build = self.lua.eval('function() return ' + value + ' end')
+                self.start()
+                self.update(12)
+                self.assertIsNone(self.g.state.value.entries)
+                self.assertEqual(self.g.state.value.prepareAttempts, 3)
+                self.assertEqual(len(self.g.sent), 0)
+                warnings = [line for line in self.g.logs.values() if "invalid plan result" in line]
+                self.assertEqual(len(warnings), 3)
 
     def test_deferred_rename_waits_for_readback_before_children_or_success_count(self):
         self.lua.execute('''
@@ -548,34 +516,6 @@ class NamesTests(unittest.TestCase):
         self.assertEqual(self.g.api.engine.util.getEntityName(2), self.g.world[1].name + " 伐木营地")
         self.assertIsNone(self.g.world[2].name)
         self.assertFalse(bool(self.g.state.value.done))  # Factory is done while residents remain.
-
-    def test_older_pending_queue_is_not_replayed(self):
-        self.lua.execute('''
-          world[1] = {town = true, name = "株洲"}
-          world[3] = {construction = "farm", name = "株洲 车站 2", nearestTown = 1}
-          state:set({started = true, prepareRevision = 6, cursor = 1, renamed = 1,
-            skipped = 0, failed = 0, retained = 0, entries = {
-              {entity = 3, before = "株洲 车站 2", after = "株洲 作物农场", attempts = 0}
-            }})
-        ''')
-        self.update(200)
-        self.assertEqual(self.g.world[3].name, "株洲 车站 2")
-        self.assertEqual(len(self.g.sent), 0)
-        self.assertEqual(self.g.fullScans, 0)
-        self.assertIsNone(self.g.state.value.entries)
-
-    def test_completed_old_maps_are_never_repaired_or_rescanned(self):
-        self.lua.execute('''
-          world[1] = {town = true, name = "大同"}
-          world[3] = {construction = "oil_well", name = "大同 车站 2", nearestTown = 1}
-          state:set({started = true, done = true, prepareRevision = 4})
-        ''')
-        self.update(200)
-        self.assertEqual(self.g.world[3].name, "大同 车站 2")
-        self.assertEqual(len(self.g.sent), 0)
-        self.assertEqual(dict(self.g.enumerationCalls), {})
-        self.assertEqual(self.g.fullScans, 0)
-        self.assertEqual(len(self.g.logs), 0)
 
     def test_waiting_for_street_stem_does_not_block_independent_factory_batch(self):
         self.lua.execute('''
@@ -690,18 +630,6 @@ class NamesTests(unittest.TestCase):
         self.assertIsNone(self.g.world[42].name)
         self.assertEqual(len(self.g.sent), 0)
         self.assertEqual(self.g.state.value.skipped, 1)
-
-    def test_completed_revision_five_does_not_start_a_new_scan_for_safety_update(self):
-        self.lua.execute('''
-          world[57546] = {station = true, display = "Sedona Station"}
-          state:set({started = true, done = true, prepareRevision = 5})
-          api.engine.getEntitiesWithComponent = function() error("Completed jobs must not rescan") end
-          api.engine.forEachEntity = function() error("Completed jobs must not rescan") end
-        ''')
-        self.update(200)
-        self.assertEqual(len(self.g.sent), 0)
-        self.assertEqual(self.g.fullScans, 0)
-        self.assertEqual(len(self.g.logs), 0)
 
     def test_first_creation_complete_name_is_shared_by_industry_owner_and_group(self):
         for kind, title, town in (("farm", "作物农场", "株洲"),

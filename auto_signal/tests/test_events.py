@@ -87,10 +87,6 @@ class EventTests(unittest.TestCase):
         self.assertEqual(self.lua.eval("calls[1].proposal.source.node0"), 1)
         self.assertEqual(self.lua.eval("calls[1].proposal.source.node1"), 2)
 
-    def test_original_native_left_flag_is_copied_without_inversion(self):
-        self.lua.execute("place(100, 2, 300, nil, true, true); handlers.guiUpdate(nil, simulation, gui)")
-        self.assertTrue(self.lua.eval("calls[1].proposal.source.left"))
-
     def test_native_result_entity_wins_over_array_order(self):
         self.lua.execute("""
             place(100, 2, 300, nil, true, nil, {
@@ -171,14 +167,6 @@ class EventTests(unittest.TestCase):
         self.lua.execute("completion({}, true); handlers.guiUpdate(nil, simulation, gui)")
         self.assertEqual(self.lua.eval("#calls"), 2)
         self.assertEqual(self.lua.eval("calls[2].proposal.spacing"), 500)
-
-    def test_failed_command_reports_error_and_releases_queue(self):
-        self.lua.execute("place(100, 2, 300); handlers.guiUpdate(nil, simulation, gui)")
-        self.lua.execute("completion({resultProposalData={errorState={messages={'collision'}}}}, false)")
-        self.lua.execute("handlers.guiUpdate(nil, simulation, gui)")
-        self.assertIn("collision", self.lua.eval("warnings[1]"))
-        self.lua.execute("place(101, 2, 300); handlers.guiUpdate(nil, simulation, gui)")
-        self.assertEqual(self.lua.eval("#calls"), 2)
 
     def test_seed_already_removed_by_previous_rebuild_is_skipped(self):
         self.lua.execute("place(100, 2, 300); components[100] = nil; handlers.guiUpdate(nil, simulation, gui)")

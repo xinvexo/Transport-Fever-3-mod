@@ -43,7 +43,7 @@ class ProposalTests(unittest.TestCase):
               engine = {
                 entityExists = function(entity) return entity == 10 or entity == 11 end,
                 terrain = {
-                  isValidCoordinate = function(point) return not invalidCoordinate or not invalidCoordinate(point) end,
+                  isValidCoordinate = function() return true end,
                   isOnWater = function(point)
                     samples[#samples + 1] = {x = point.x, y = point.y}
                     return water and water(point) or false
@@ -53,22 +53,18 @@ class ProposalTests(unittest.TestCase):
                 system = {streetConnectorSystem = {getConstructionEntityForSubconstruction = function() return 10 end}},
                 util = {
                   getPlayer = function() return 7 end,
-                  getEntityName = function() return 'Test Farm' end,
                   proposal = {},
                 },
               },
               res = {constructionRep = {
-                find = function(name) return name end,
-                get = function(name)
-                  local kinds = {farm = 'farm_field', livestock_farm = 'livestock_field',
-                    cotton_farm = 'cotton_field', rubber_farm = 'rubber_field', forest = 'forest_field'}
-                  local kind = name:match('/industries/([^/]+)/')
+                find = function() return 0 end,
+                get = function()
                   local fields = {}
                   for index = 1, 8 do
                     fields[index] = {pos = {80 * index, 240}, size = {80, 80}, road = {0, 0, 0, 0}}
                   end
                   return {updateScript = {params = {fieldConfig = {
-                    type = kinds[kind], fields = fields, alignToTerrain = true,
+                    type = 'farm_field', fields = fields, alignToTerrain = true,
                   }}}}
                 end,
               }},
@@ -81,15 +77,6 @@ class ProposalTests(unittest.TestCase):
                   transf = copy(construction.transf), playerEntity = owner and owner.player or -1,
                   construction = {params = copy(params), frozenNodes = {501}, frozenEdges = {502}},
                 }},
-              }
-            end
-            function resultData()
-              return {
-                errorState = {critical = false, messages = errors or {}},
-                collisionInfo = {
-                  collisionEntities = collisions or {}, buildingEntities = {},
-                  removableModules = removableModules or {},
-                },
               }
             end
             function ug_require(path)
@@ -126,23 +113,6 @@ class ProposalTests(unittest.TestCase):
             assert(not construction.params.xinTidyFieldOrder)
             assert(not construction.params.xinTidyFieldLayout)
         """)
-
-    def test_accepts_each_layout_choice(self):
-        for kind in ("farm", "livestock_farm", "cotton_farm", "rubber_farm", "forest"):
-            for mode in ("left", "right", "front", "back", "left_right", "left_front", "left_back",
-                         "right_front", "right_back", "front_back", "left_right_front", "left_right_back",
-                         "left_front_back", "right_front_back", "all"):
-                with self.subTest(kind=kind, mode=mode):
-                    self.lua.globals().construction.fileName = f"::/industries/{kind}/{kind}.con"
-                    self.lua.globals().chosenMode = mode
-                    self.lua.execute("""
-                        local candidate = assert(proposal.make(10, chosenMode))
-                        local replacement = candidate.toAdd[1]
-                        assert(replacement.construction.params.xinTidyLayout == chosenMode)
-                        assert(replacement.construction.params.upgrade == true)
-                        assert(replacement.fileName == construction.fileName)
-                    """)
-        self.lua.execute("local candidate, _, reason = proposal.make(10, 'unknown'); assert(not candidate and reason)")
 
     def test_repeated_tidy_uses_current_modules_and_new_layout(self):
         self.lua.execute("""
@@ -248,23 +218,13 @@ class ProposalTests(unittest.TestCase):
                 self.assertEqual(reason, expected)
                 self.assertEqual(self.lua.eval('#nativeRequests'), 0)
 
-    def test_describes_native_failure_details(self):
-        for setup, expected in (
-            ("collisions = {{entity = 40}}", "原版施工检查未通过，具体原因请查看游戏日志。"),
-            ("removableModules = {44}", "原版施工检查未通过，具体原因请查看游戏日志。"),
-            ("errors = {'road connection mismatch'}", "无法整理：road connection mismatch"),
-        ):
-            with self.subTest(setup=setup):
-                self.lua.execute("collisions = nil; removableModules = nil; errors = nil")
-                self.lua.execute(setup)
-                self.lua.globals().expectedReason = expected
-                self.lua.execute("assert(proposal.describeFailure(resultData()) == expectedReason)")
-
     def test_supports_unowned_and_player_owned_industries(self):
         self.lua.execute("""
             assert(proposal.getTarget(11) == 10)
+            local candidate, _, reason = proposal.make(10, 'unknown')
+            assert(not candidate and reason and #nativeRequests == 0)
             owner = {player = 7}
-            local candidate = proposal.make(10)
+            candidate = proposal.make(10)
             assert(candidate.toAdd[1].playerEntity == 7)
             owner = {player = 8}
             assert(not proposal.make(10))

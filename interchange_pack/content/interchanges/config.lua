@@ -1,22 +1,22 @@
 local M = {}
 
 M.types = {
-  cloverleaf = { name = "Cloverleaf interchange", icon = "cloverleaf_interchange", order = 6100,
+  cloverleaf = { name = "Cloverleaf interchange", order = 6100,
     text = "All four loops are enabled by default. Shared arcs use one native two-way road with one lane each way, connected to one-way ramps. Right turns remain when a loop is disabled." },
-  diamond = { name = "Diamond interchange", icon = "diamond_interchange", order = 6200,
+  diamond = { name = "Diamond interchange", order = 6200,
     text = "Connects an east-west highway to a north-south two-way road. Each of the four ramps can be disabled. Cross-road endpoints remain elevated." },
-  trumpet = { name = "Trumpet interchange", icon = "trumpet_interchange", order = 6300,
+  trumpet = { name = "Trumpet interchange", order = 6300,
     text = "Connects an east-west highway to a two-lane branch on the south, with one loop ramp. Use the game's rotation controls to change the branch direction." },
-  directional = { name = "Directional T interchange", icon = "t_interchange", order = 6400,
+  directional = { name = "Directional T interchange", order = 6400,
     text = "Connects an east-west mainline to a southern branch. Every turn has a separate ramp; the two left turns cross at different levels." },
-  turbine = { name = "Turbine interchange", icon = "cloverleaf_interchange", order = 6500,
+  turbine = { name = "Turbine interchange", order = 6500,
     text = "A full four-way interchange with four left-turn ramps sweeping around the center. Its larger footprint suits highway junctions." },
-  stack = { name = "Four-level stack interchange", icon = "t_interchange", order = 6600,
+  stack = { name = "Four-level stack interchange", order = 6600,
     text = "Two mainline levels and two left-turn ramp levels provide all twelve through and turning movements." },
 }
 
-local function option(key, name, values, default)
-  return { key = key, name = name, values = values, defaultIndex = default or 1,
+local function option(key, name, values)
+  return { key = key, name = name, values = values, defaultIndex = 1,
     displayMode = "Horizontal" }
 end
 

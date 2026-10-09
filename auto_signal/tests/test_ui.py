@@ -1,4 +1,3 @@
-import json
 import unittest
 from pathlib import Path
 
@@ -11,8 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class SignalUiTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.translations = json.loads((ROOT / "strings.json").read_text(encoding="utf-8"))
-        self.set_language("en")
+        self.lua.globals()["_"] = lambda text: text
         self.modifier = None
 
         def add_modifier(name, callback):
@@ -22,13 +20,6 @@ class SignalUiTests(unittest.TestCase):
         self.lua.globals().addModifier = add_modifier
         self.load_script("content/mod.script.lua").runFn()
         self.ui = self.load_script("content/auto_signal/ui.script.lua")
-
-    def set_language(self, language):
-        localized = self.translations.get(language, {})
-        english = self.translations["en"]
-        self.lua.globals()["_"] = lambda text: localized.get(
-            text, english.get(text, text)
-        )
 
     def load_script(self, path):
         self.lua.execute((ROOT / path).read_text(encoding="utf-8"))
@@ -83,16 +74,6 @@ class SignalUiTests(unittest.TestCase):
         self.assertEqual(self.ui.stepMinimumSpacing(None, 300, -1), 250)
         self.assertEqual(self.ui.stepMinimumSpacing(None, 50, -1), 1)
         self.assertEqual(self.ui.stepMinimumSpacing(None, 2000, 1), 2050)
-
-    def test_localized_labels_and_units(self):
-        for language, label, unit in (
-            ("en", "Auto placement", "300 m"),
-            ("zh_CN", "自动布置", "300 米"),
-            ("unsupported", "Auto placement", "300 m"),
-        ):
-            self.set_language(language)
-            self.assertEqual(self.signal_params()[2].name, label)
-            self.assertEqual(self.ui.formatMinimumSpacing(None, 300), unit)
 
     def test_large_integer_format_does_not_overflow_lua52_percent_d(self):
         for value in (2147483648, 4503599627370497, 2**53-1):

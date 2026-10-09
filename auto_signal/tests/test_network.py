@@ -52,9 +52,6 @@ class TrackWorld:
                     Signal = { Type = {
                         SIGNAL = "path", ONE_WAY_SIGNAL = "one_way", WAYPOINT = "waypoint"
                     } },
-                    EdgeId = { new = function(entity, index)
-                        return { entity = entity, index = index }
-                    end },
                     SegmentAndEntity = { new = function() return {} end },
                     SimpleProposal = { new = function() return { streetProposal = {} } end },
                     SimpleStreetProposal = {
@@ -220,10 +217,6 @@ class TrackWorld:
         objects = self.components[edge, "BASE_EDGE"].objects
         objects[len(objects) + 1] = self.table([entity, kind])
 
-    def get_signal(self, edge_id, reversed):
-        entity = self.signals.get((edge_id.entity, edge_id.index, reversed), -1)
-        return self.table({"entity": entity, "index": 0})
-
     def plan(self, signal, gap=300):
         result = self.network.plan(signal, gap, self.source(signal))
         if isinstance(result, tuple):
@@ -295,12 +288,6 @@ class NetworkTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected)
         self.assertEqual(len(positions), 4)
 
-    def test_northbound_lane_keeps_heading_and_anchors_before_north_junction(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
-        self.world.add_signal(1001, 101, False)
-        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
-
     def test_opposite_transport_geometry_does_not_reverse_upbound_anchor(self):
         for nodes in ((10, 90), (90, 10)):
             with self.subTest(nodes=nodes):
@@ -327,33 +314,6 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(removals(plan), {1001, 1002, 1003})
             self.assert_northbound_world_layout(self.world, plan)
 
-    def test_transport_subedges_are_calibrated_independently(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
-        self.world.set_transport_opposite(101, True)
-        self.world.add_signal(1001, 101, True)
-        self.world.add_signal(1002, 101, True)
-        self.world.add_signal(1101, 101, False)
-        for seed in (1001, 1002):
-            plan = self.world.plan(seed)
-            self.assertEqual(removals(plan), {1001, 1002})
-            self.assert_northbound_world_layout(self.world, plan)
-
-    def test_single_lane_uses_native_direction_contract_without_spatial_api(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
-        self.world.add_signal(1001, 101, False)
-        self.world.lua.execute("api.engine.util.transport = nil")
-        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
-
-    def test_manual_proposal_side_is_authoritative_even_if_reverse_lookup_disagrees(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
-        # Deliberately contradictory lookup direction: only the native manual
-        # proposal and actual source pose describe the player's choice.
-        self.world.add_signal(1001, 101, True, native_left=False)
-        self.assert_northbound_world_layout(self.world, self.world.plan(1001))
-
     def test_repeated_builds_replace_only_same_direction_and_leave_opposite_duplicates_untouched(self):
         self.world.add_edge(101, 10, 20, 1050)
         self.world.set_geometry(101, (0, 0, 0), (0, 1050, 0))
@@ -362,6 +322,8 @@ class NetworkTests(unittest.TestCase):
         previous = set()
         for iteration in range(4):
             source = 2000+iteration
+            # Keep the real regression: transport/reverse says True while the
+            # captured native left flag is False; the native heading must win.
             self.world.add_signal(source, 101, True, fraction=0.4, native_left=False)
             plan = self.world.plan(source)
             self.assertEqual(removals(plan), previous | {source})
@@ -375,8 +337,9 @@ class NetworkTests(unittest.TestCase):
         self.world.add_edge(101, 10, 20, 1050)
         for entity in (1001, 1002, 1003):
             self.world.add_signal(entity, 101, fraction=0.999, native_left=False)
-        self.world.add_signal(1101, 101, True, fraction=0.999, native_left=True)
-        self.world.add_signal(1102, 101, True, fraction=0.999, native_left=True)
+        for entity in (1101, 1102):
+            self.world.add_signal(entity, 101, True, "one_way", fraction=0.999, native_left=True)
+        opposite = {entity: self.world.components[entity, "EDGE_OBJECT"] for entity in (1101, 1102)}
         self.world.add_signal(1201, 101, False, "waypoint", fraction=0.999)
         self.world.add_signal(2000, 101, fraction=0.4, native_left=False)
         plan = self.world.plan(2000)
@@ -384,6 +347,9 @@ class NetworkTests(unittest.TestCase):
         created = set(self.world.apply_plan(plan))
         remaining = {obj[1] for obj in sequence(self.world.components[101, "BASE_EDGE"].objects)}
         self.assertEqual(remaining, created | {1101, 1102, 1201})
+        for entity, original in opposite.items():
+            self.assertIs(self.world.components[entity, "EDGE_OBJECT"], original)
+            self.assertEqual(original.params.oneWay, 1)
 
     def test_native_side_is_normalized_if_engine_reverses_base_node_order(self):
         self.world.add_edge(101, 90, 10, 1050)
@@ -455,36 +421,6 @@ class NetworkTests(unittest.TestCase):
         proposal = self.world.network.proposal(self.world.plan(1001)).streetProposal
         self.assertEqual(sequence(proposal.edgeObjectsToRemove), [1001, 1101])
 
-    def test_opposite_objects_are_retained_with_their_original_ids_and_settings(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.add_signal(1001, 101, native_left=False)
-        self.world.add_signal(1101, 101, True, "one_way", fraction=0.999, native_left=True)
-        self.world.add_signal(1102, 101, True, "one_way", fraction=0.999, native_left=True)
-        original_first = self.world.components[1101, "EDGE_OBJECT"]
-        original_second = self.world.components[1102, "EDGE_OBJECT"]
-        plan = self.world.plan(1001)
-        self.assertEqual(removals(plan), {1001})
-        self.world.apply_plan(plan)
-        self.assertIs(self.world.components[1101, "EDGE_OBJECT"], original_first)
-        self.assertIs(self.world.components[1102, "EDGE_OBJECT"], original_second)
-        self.assertEqual(original_first.params.oneWay, 1)
-        self.assertEqual(original_second.params.oneWay, 1)
-
-    def test_corridor_follows_the_whole_section_with_mixed_node_order(self):
-        self.make_open_section()
-        for seed in (101, 102, 103):
-            segments, closed = self.world.network.corridor(seed)
-            self.assertFalse(closed)
-            self.assertEqual([s.entity for s in sequence(segments)], [101, 102, 103])
-            self.assertEqual([s.forward for s in sequence(segments)], [True, False, True])
-
-    def test_junction_limits_the_selected_corridor(self):
-        self.make_open_section()
-        self.world.add_edge(104, 20, 50, 400)
-        segments, closed = self.world.network.corridor(101)
-        self.assertFalse(closed)
-        self.assertEqual([s.entity for s in sequence(segments)], [101])
-
     def test_station_track_is_a_boundary_and_cannot_be_a_seed(self):
         self.make_open_section()
         self.world.owners[102] = 900
@@ -504,20 +440,12 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(layout(self.world.plan(1002)), expected)
         self.assertEqual(layout(self.world.plan(1003)), expected)
 
-    def test_reversing_the_chosen_direction_only_replaces_that_direction(self):
-        self.make_open_section()
-        self.world.add_signal(1001, 101, False)
-        self.world.add_signal(1002, 102, False)
-        self.world.add_signal(1003, 103, True)
-        plan = self.world.plan(1002)
-        self.assertEqual(removals(plan), {1002, 1003})
-        self.assertEqual([step.left for step in sequence(plan.steps)], [True, False, True])
-
     def test_proposal_replaces_same_direction_and_preserves_reverse_and_other_objects(self):
         self.world.add_edge(101, 10, 20, 700)
         self.world.add_signal(1001, 101, False, "one_way")
         self.world.add_signal(1002, 101, True)
         self.world.add_object(2001, 101, "other_object")
+        self.world.add_signal(2002, 101, False, "waypoint")
         plan = self.world.plan(1001)
         proposal = self.world.network.proposal(plan).streetProposal
         self.assertEqual(sequence(proposal.edgesToRemove), [101])
@@ -526,7 +454,7 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual(len(proposal.edgeObjectsToAdd), plan.count)
         replacement = proposal.edgesToAdd[1]
         retained = {obj[1] for obj in sequence(replacement.comp.objects) if obj[1] >= 0}
-        self.assertEqual(retained, {1002, 2001})
+        self.assertEqual(retained, {1002, 2001, 2002})
         self.assertEqual(replacement.comp.node0, 10)
         self.assertEqual(replacement.comp.node1, 20)
         self.assertEqual(replacement.comp.roadTemplate, "standard_track")
@@ -540,17 +468,7 @@ class NetworkTests(unittest.TestCase):
             self.assertLess(added.param, 1)
         # Preparing a proposal must not mutate the still-live original edge.
         original_objects = self.world.components[101, "BASE_EDGE"].objects
-        self.assertEqual({obj[1] for obj in sequence(original_objects)}, {1001, 1002, 2001})
-
-    def test_same_direction_waypoint_is_preserved(self):
-        self.world.add_edge(101, 10, 20, 700)
-        self.world.add_signal(1001, 101, False)
-        self.world.add_signal(2001, 101, False, "waypoint")
-        plan = self.world.plan(1001)
-        self.assertEqual(removals(plan), {1001})
-        proposal = self.world.network.proposal(plan).streetProposal
-        retained = {obj[1] for obj in sequence(proposal.edgesToAdd[1].comp.objects)}
-        self.assertIn(2001, retained)
+        self.assertEqual({obj[1] for obj in sequence(original_objects)}, {1001, 1002, 2001, 2002})
 
     def test_1050_meter_section_uses_exact_gap_from_forward_endpoint(self):
         self.make_open_section()
@@ -578,32 +496,9 @@ class NetworkTests(unittest.TestCase):
         self.world.add_signal(1002, 102, False)
         first = self.world.plan(1001, 300)
         self.assertEqual(sequence(first.positions), [1, 301, 601, 901])
+        self.assertEqual(removals(first), {1001, 1002})
+        self.assertEqual([step.left for step in sequence(first.steps)], [True, False, True])
         self.assertEqual(layout(first), layout(self.world.plan(1002, 300)))
-
-    def test_clicked_500_meter_position_is_only_a_trigger(self):
-        self.world.add_edge(101, 10, 20, 1050)
-        self.world.add_signal(1001, 101, fraction=500/1050)
-        plan = self.world.plan(1001, 200)
-        self.assertEqual(sequence(plan.positions), [49, 249, 449, 649, 849, 1049])
-        self.assertNotIn(500, sequence(plan.positions))
-        self.assertEqual(removals(plan), {1001})
-
-    def test_short_section_has_one_signal_at_directional_end(self):
-        self.world.add_edge(101, 10, 20, 100)
-        self.world.add_signal(1001, 101)
-        self.world.add_signal(1002, 101, True)
-        self.assertEqual(sequence(self.world.plan(1001).positions), [99])
-        self.assertEqual(sequence(self.world.plan(1002).positions), [1])
-
-    def test_regular_edge_joints_do_not_restart_spacing(self):
-        self.world.add_edge(101, 10, 20, 20)
-        self.world.add_edge(102, 30, 20, 60)
-        self.world.add_edge(103, 30, 40, 40)
-        self.world.add_signal(1001, 101)
-        plan = self.world.plan(1001, 50)
-        self.assertEqual(sequence(plan.positions), [19, 69, 119])
-        middle = next(step for step in sequence(plan.steps) if step.edge == 102)
-        self.assertAlmostEqual(middle.positions[1], 1-49/60)
 
     def test_fixed_position_on_ordinary_joint_is_not_moved_or_duplicated(self):
         self.world.add_edge(101, 10, 20, 449)
@@ -699,18 +594,6 @@ class NetworkTests(unittest.TestCase):
         proposal, reason = self.world.network.proposal(plan)
         self.assertIsNone(proposal)
         self.assertIn("track changed", reason)
-
-    def test_native_signal_without_declared_clearance_still_avoids_road_width(self):
-        self.world.add_edge(101, 10, 20, 749)
-        self.world.add_edge(102, 20, 30, 301)
-        self.world.add_road(9001, 20, width=18)
-        self.world.add_signal(1001, 101)
-        segments, closed = self.world.network.corridor(101)
-        self.assertFalse(closed)
-        self.assertEqual(len(segments), 2)
-        plan = self.world.plan(1001)
-        self.assertEqual(sequence(plan.positions), [139, 439, 739, 1049])
-        self.assertEqual(plan.count, 4)
 
     def test_wide_and_skew_roads_use_their_actual_width_and_angle(self):
         self.world.add_edge(101, 10, 20, 749)

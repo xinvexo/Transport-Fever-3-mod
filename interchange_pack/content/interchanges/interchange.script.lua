@@ -27,7 +27,7 @@ function data()
       local result = { models = {}, groundFaces = {}, edgeLists = {}, cost = 0 }
       local groups = {}
       local profile = roads.select(params)
-      local bridge = "::/infrastructure/bridge/" .. (params.bridge == 2 and "steel" or "concrete") .. ".bridge"
+      local bridge = "::/infrastructure/bridge/concrete.bridge"
       for _, path in ipairs(network.roads) do
         local street = profile[path.profile or path.role] or profile.ramp
         for index, s in ipairs(path.segments) do

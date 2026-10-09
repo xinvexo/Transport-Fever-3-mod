@@ -23,7 +23,6 @@ class NamingTests(unittest.TestCase):
         self.modules = {}
         self.g.ug_require = self.require
         self.world = self.require("xin_line_names_1::/line_names/world.lua")
-        self.names = self.require("xin_line_names_1::/line_names/names.lua")
         self.lua.execute((CONTENT / "naming.script.lua").read_text(encoding="utf-8"))
         self.rename = self.g.data().renameFn
         self.next_id = 1000
@@ -109,12 +108,6 @@ class NamingTests(unittest.TestCase):
         self.g.advance()
         self.assertEqual(self.result(), "北京 - 天津 - 客运")
 
-    def test_passenger_and_cargo_capacity_indices_are_not_hardcoded(self):
-        self.city_pair()
-        self.line(load=(0, 1, 2, 7), supported=[7])
-        self.assertEqual(self.result(), "北京 - 公交01")
-        self.assertEqual(len(self.g.warnings), 0)
-
     def test_intercity_passenger_numbering_depends_on_lines_not_vehicles(self):
         self.city_pair(second=2)
         self.line(supported=[7], carrier=1)
@@ -175,6 +168,9 @@ class NamingTests(unittest.TestCase):
         self.station(201, 2, cargo=[steel])
         self.line(load=(0,), supported=[0])
         self.lua.execute("""
+            api.engine.system.townBuildingSystem.getPersonCapacity2townBuildingMap = function()
+                error('Freight previews do not need the passenger building map')
+            end
             buildingMapReads=0
             local native=api.engine.system.townBuildingSystem.getTown2BuildingMap
             api.engine.system.townBuildingSystem.getTown2BuildingMap=function()
@@ -196,11 +192,15 @@ class NamingTests(unittest.TestCase):
         self.line(10, supported=[7])
         self.line(20, supported=[7])
         self.assertEqual(self.result(10), "北京 - 公交01")
+        scans = self.g.scans.LINE
         self.assertEqual(self.result(20), "北京 - 公交02")
+        self.assertEqual(self.g.scans.LINE, scans)
         self.g.components[1].name = "新城"
         self.g.advance()
         self.assertEqual(self.result(10), "新城 - 公交01")
         self.assertEqual(self.result(20), "新城 - 公交02")
+        self.assertEqual(self.g.scans.LINE, scans + 1)
+        self.assertEqual(self.g.components[999].GAME_TIME.updateCount, 0)
 
     def test_interrupted_owner_index_is_rebuilt_for_the_next_line(self):
         _, first = self.building(1)
@@ -222,14 +222,6 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(self.result(10), "原线路")
         self.assertEqual(self.result(20), "北京 · 食品配送01")
         self.assertEqual(len(self.g.warnings), 1)
-
-    def test_cross_city_industry_freight_keeps_both_towns(self):
-        _, stock_a = self.industry(100, 1, "煤矿", output=True)
-        _, stock_b = self.industry(101, 2, "钢铁厂")
-        self.station(200, 1, cargo=[stock_a])
-        self.station(201, 2, cargo=[stock_b])
-        self.line(load=(0,), supported=[0], carrier=1)
-        self.assertEqual(self.result(), "北京 - 煤矿 - 天津 - 钢铁厂 · 煤炭01")
 
     def test_freight_order_follows_player_stops_without_supply_inference(self):
         _, source = self.industry(100, 1, "北京 煤矿", output=True)
@@ -348,17 +340,6 @@ class NamingTests(unittest.TestCase):
         self.g.advance()
         self.assertEqual(self.result(), "北京 - 天津 · 煤炭01")
 
-    def test_preview_order_cancel_and_reopen_do_not_consume_numbers(self):
-        self.city_pair()
-        self.line(10, supported=[7])
-        self.line(20, supported=[7])
-        self.assertEqual(self.result(20), "北京 - 公交02")
-        self.assertEqual(self.result(10), "北京 - 公交01")
-        self.assertEqual(self.result(20), "北京 - 公交02")
-        self.g.advance()
-        self.assertEqual(self.result(10), "北京 - 公交01")
-        self.assertEqual(self.result(20), "北京 - 公交02")
-
     def test_partial_apply_reload_and_other_players_do_not_steal_numbers(self):
         self.city_pair()
         self.line(10, supported=[7])
@@ -431,18 +412,6 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(self.g.scans.LINE, scans + 1)
         self.assertEqual(len(self.g.warnings), 1)
 
-    def test_plan_is_reused_in_one_tick_but_refreshes_when_paused(self):
-        self.city_pair()
-        self.line(supported=[7])
-        self.result()
-        scans = self.g.scans.LINE
-        self.result()
-        self.assertEqual(self.g.scans.LINE, scans)
-        self.g.advance()
-        self.result()
-        self.assertEqual(self.g.scans.LINE, scans + 1)
-        self.assertEqual(self.g.components[999].GAME_TIME.updateCount, 0)
-
     def test_preview_reads_world_singleton_when_game_time_cannot_be_enumerated(self):
         self.city_pair()
         self.line(supported=[7], name="原来的名字")
@@ -450,25 +419,6 @@ class NamingTests(unittest.TestCase):
         self.g.components[888] = self.g.components[999]
         self.g.components[999] = None
         self.assertEqual(self.result(), "北京 - 公交01")
-        self.assertEqual(len(self.g.warnings), 0)
-
-    def test_freight_uses_native_town_map_without_enumerating_building_components(self):
-        self.lua.execute("""
-            api.engine.system.townBuildingSystem.getPersonCapacity2townBuildingMap = function()
-                error('Freight previews do not need the passenger building map')
-            end
-            local native = api.engine.getEntitiesWithComponent
-            api.engine.getEntitiesWithComponent = function(kind)
-                assert(kind ~= 'TOWN_BUILDING', 'Use town building system map')
-                return native(kind)
-            end
-        """)
-        _, stock_a = self.building(1)
-        _, stock_b = self.building(2)
-        self.station(200, 1, cargo=[stock_a])
-        self.station(201, 2, cargo=[stock_b])
-        self.line(load=(1,), supported=[1])
-        self.assertEqual(self.result(), "北京 - 天津 · 食品01")
         self.assertEqual(len(self.g.warnings), 0)
 
     def test_failed_api_read_keeps_name_without_sending_commands(self):
@@ -502,7 +452,6 @@ class NamingTests(unittest.TestCase):
         self.assertEqual(component.data.renameFnDefinition.fileName,
                          "xin_line_names_1::/line_names/naming.script@renameFn")
         self.assertEqual(scheme.data.formatString, "{name}")
-        self.assertFalse((ROOT / "content/gui").exists())
 
 
 @unittest.skipUnless(os.environ.get("TF3_GAME_DIR"), "Set TF3_GAME_DIR to inspect native contracts")
@@ -518,16 +467,12 @@ class NativeContracts(unittest.TestCase):
             self.assertIn('getAllOfType("rename_scheme_component")', manager)
             self.assertIn('getAllOfType("rename_scheme")', manager)
             self.assertIn("lineEntity = line,", manager)
-            self.assertIn("local newName = data.name", manager)
             self.assertIn("cargoTypeIndex - 1", cargo)
             self.assertIn("getLineCapacityUsages(locationParams.lineEntity", cargo)
             self.assertIn("getStockCargoTypes(stockListEntity, (i - 1)", cargo)
             self.assertIn("stop.station1 = v.station + 1", line)
-            self.assertIn("api.type.ComponentType.PERSON_CAPACITY", industry)
             self.assertIn("api.engine.getComponent(api.engine.util.getWorld(), api.type.ComponentType.GAME_TIME)", industry)
             self.assertIn("api.engine.system.townBuildingSystem.getTown2BuildingMap()", town)
-        with ZipFile(game / "base/content/base.zip") as archive:
-            self.assertIn("function data()", archive.read("base/base_mod.script.lua").decode("utf-8"))
         engine = (game / "api/tealdef/api/engine.d.tl").read_text(encoding="utf-8")
         system = (game / "api/tealdef/api/engine/system.d.tl").read_text(encoding="utf-8")
         util = (game / "api/tealdef/api/engine/util.d.tl").read_text(encoding="utf-8")

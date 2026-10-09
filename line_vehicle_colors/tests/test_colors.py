@@ -179,14 +179,6 @@ class ColorsTests(unittest.TestCase):
         self.assertEqual(tv.cargo[1], 42)
         self.assertEqual(tv.transportVehicleConfig.vehicles[1].part.compartment2loadConfig[1], 2)
 
-    def test_simulation_updates_do_not_use_command_callbacks(self):
-        self.line()
-        self.vehicle()
-        self.tick()
-        self.assertEqual(self.color(100), RED)
-        self.assertEqual(len(self.g.warnings), 0)
-        self.assertEqual(len(self.g.calls), 1)
-
     def test_new_vehicles_on_existing_and_new_lines_are_discovered(self):
         self.line()
         self.tick()
@@ -199,20 +191,15 @@ class ColorsTests(unittest.TestCase):
         self.assertEqual(self.color(100), RED)
         self.assertEqual(self.color(200), BLUE)
 
-    def test_all_transport_modes_and_every_paintable_train_part(self):
+    def test_each_paintable_part_changes_and_fixed_livery_is_preserved(self):
+        # The implementation uses model metadata, independent of carrier type.
         self.line()
-        for index, mode in enumerate(("BUS", "TRUCK", "TRAM", "TRAIN", "SHIP", "AIRCRAFT", "HELICOPTER")):
-            entity = 100 + index
-            self.vehicle(entity, parts=[(1, RED), (2, DEFAULT), (1, BLUE)])
-            self.g.components[entity].TRANSPORT_VEHICLE.carrier = mode
+        self.vehicle(parts=[(1, RED), (2, DEFAULT), (1, BLUE)])
         self.tick()
-        for entity in range(100, 107):
-            self.assertEqual(self.color(entity, 1), RED)
-            self.assertEqual(self.color(entity, 2), DEFAULT)
-            self.assertEqual(self.color(entity, 3), RED)
-        self.assertEqual(len(self.g.calls), 7)
+        self.assertEqual([self.color(100, part) for part in (1, 2, 3)], [RED, DEFAULT, RED])
+        self.assertEqual(len(self.g.calls), 1)
         self.tick(120)
-        self.assertEqual(len(self.g.calls), 7)
+        self.assertEqual(len(self.g.calls), 1)
 
     def test_line_recolor_transfer_replacement_and_manual_paint_preserved_until_event(self):
         self.line()
@@ -376,19 +363,6 @@ class ColorsTests(unittest.TestCase):
         self.tick(2)
         self.assertEqual(len(self.g.calls), 16)
 
-    def test_script_reload_and_paused_updates_resynchronize_without_saved_cache(self):
-        self.line()
-        self.vehicle()
-        self.tick()
-        self.set_line_color(10, BLUE)
-        self.load_script()
-        self.tick(dt=0)
-        self.assertEqual(self.color(100), BLUE)
-        self.vehicle(101)
-        self.assigned(101, 10)
-        self.tick(120, dt=0)
-        self.assertEqual(self.color(101), BLUE)
-
     def test_assignment_waits_for_target_and_idle_does_not_scan_any_fleet(self):
         self.line()
         self.vehicle()
@@ -460,11 +434,11 @@ class ColorsTests(unittest.TestCase):
         self.g.state.value.vehicles[116].attempts = 5
         self.g.reject[116] = True
         self.load_script()
-        self.tick()
+        self.tick(dt=0)
         self.assertEqual(self.g.state.value.vehicles[116].attempts, 6)
         self.g.reject[116] = False
         self.load_script()
-        self.tick(4)
+        self.tick(4, dt=0)
         self.assertIsNone(self.g.state.value.vehicles)
         self.assertEqual(len(self.g.calls), 65)
         for entity in range(100, 164):

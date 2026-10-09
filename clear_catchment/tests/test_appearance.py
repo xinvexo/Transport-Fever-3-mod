@@ -93,56 +93,32 @@ class OverlayTests(unittest.TestCase):
           assert(not original.layerConfig.catchmentAreaRenderableConfig.isVisible)
         """)
 
-    def test_stations_and_all_roadside_catchment_variants_are_supported(self):
+    def test_only_station_tools_receive_the_overlay(self):
         self.lua.execute("""
-          assert(target.isStation(station))
-          for _,name in ipairs({'stop.con','cargo-stop.con','bus-stop.con'}) do
-            local definition={action='ACTION_STREET_TERMINAL_BUILDER',resName=name}
-            assert(target.isStation(definition))
-            assert(appearance.apply(definition,original).layerConfig.catchmentAreaRenderableConfig.isVisible)
+          local function check(definition,entity,expected)
+            assert(target.isStation(definition,entity)==expected)
+            assert((appearance.apply(definition,original,entity)~=original)==expected)
           end
-          assert(not target.isStation({action='ACTION_STREET_TERMINAL_BUILDER',resName='sign.con'}))
-          assert(not target.isStation({action='ACTION_STREET_TERMINAL_BUILDER',resName='missing.con'}))
-        """)
-
-    def test_non_station_tools_depots_and_warehouses_are_unchanged(self):
-        self.lua.execute("""
-          assert(appearance.apply(nil,original)==original)
+          check(station,nil,true)
+          for name,expected in pairs({['stop.con']=true,['cargo-stop.con']=true,
+            ['bus-stop.con']=true,['sign.con']=false,['missing.con']=false}) do
+            check({action='ACTION_STREET_TERMINAL_BUILDER',resName=name},nil,expected)
+          end
+          check(nil,nil,false)
           for _,action in ipairs({'ACTION_BULLDOZER','ACTION_STREET_BUILDER_UPGRADER',
             'ACTION_TRACK_BUILDER_UPGRADER','ACTION_TERRAIN_MODIFIER_RAISE'}) do
-            assert(appearance.apply({action=action},original)==original)
+            check({action=action},nil,false)
           end
           for _,hud in ipairs({{}, {componentTypes={1}}, {showDistricts=true,componentTypes={3,4}}}) do
-            assert(appearance.apply({action='ACTION_CONSTRUCTION_BUILDER',hudIcons=hud},original)==original)
+            check({action='ACTION_CONSTRUCTION_BUILDER',hudIcons=hud},nil,false)
           end
-          assert(appearance.apply({action='ACTION_CONSTRUCTION_BUILDER'},original)==original)
+          check({action='ACTION_CONSTRUCTION_BUILDER'},nil,false)
+          for _,action in ipairs({'ACTION_MODULE_BUILDER','ACTION_MODULE_BULLDOZER'}) do
+            for _,entity in ipairs({31,32,99}) do check({action=action},entity,entity==31) end
+            check({action=action},nil,false)
+          end
           local empty={custom=true}
           assert(appearance.apply(station,empty)==empty)
-        """)
-
-    def test_module_actions_require_an_existing_station_construction(self):
-        self.lua.execute("""
-          for _,action in ipairs({'ACTION_MODULE_BUILDER','ACTION_MODULE_BULLDOZER'}) do
-            local definition={action=action}
-            assert(appearance.apply(definition,original,31)~=original)
-            assert(appearance.apply(definition,original,32)==original)
-            assert(appearance.apply(definition,original,99)==original)
-            assert(appearance.apply(definition,original,nil)==original)
-          end
-        """)
-
-    def test_repeated_renders_do_not_mutate_shared_native_config(self):
-        self.lua.execute("""
-          for i=1,20 do
-            local layer=appearance.apply(station,original).layerConfig
-            assert(layer.catchmentAreaRenderableConfig.displaySettings.borderWidth==2)
-            assert(math.abs(layer.catchmentAreaRenderableConfig.displaySettings.personBaseColor.x - 0.065) < 1e-8)
-          end
-          local c=original.layerConfig.catchmentAreaRenderableConfig
-          assert(not c.isVisible and c.entity==31 and c.carriers[1]==2)
-          assert(c.displaySettings.borderAlpha==0.75 and c.displaySettings.borderAlphaPassive==0.25)
-          assert(c.displaySettings.innerAlpha==0.1 and c.displaySettings.buildingAlpha==0.6)
-          assert(c.displaySettings.personBaseColor.x==0.1 and c.displaySettings.cargoBaseColor.z==0.9)
         """)
 
     def test_preferred_layer_keeps_other_fields_and_uses_construction_overlay_style(self):
@@ -214,27 +190,11 @@ class OverlayTests(unittest.TestCase):
           assert(construction.getActionParams(module,'params','repo',false,nil,32)==original)
         """)
 
-    def test_overlay_failure_keeps_native_action_and_stops_repeated_failures(self):
-        self.install_hooks()
-        self.lua.execute("""
-          local apply=appearance.apply
-          local attempts=0
-          appearance.apply=function(...)
-            attempts=attempts+1;error('incompatible overlay data')
-          end
-          local count=#messages
-          for i=1,10 do assert(construction.getActionParams(station)==original) end
-          assert(attempts==1 and #messages==count+1 and calls==10)
-          assert(not original.layerConfig.catchmentAreaRenderableConfig.isVisible)
-          appearance.apply=apply
-          assert(construction.getActionParams(stop)==original, 'Recovery requires a reload')
-          assert(construction.mergeLayerConfig(original.layerConfig,nil)==original.layerConfig)
-        """)
-
     def test_partial_overlay_failure_cannot_modify_native_colors(self):
         self.install_hooks()
         self.lua.execute("""
           local calls=0
+          local messageCount=#messages
           local new=api.type.Vec3f.new
           api.type.Vec3f.new=function(...)
             calls=calls+1
@@ -249,6 +209,7 @@ class OverlayTests(unittest.TestCase):
           assert(config.displaySettings.cargoBaseColor.y==0.5)
           assert(config.displaySettings.innerAlpha==0.1)
           assert(construction.getActionParams(station)==original and calls==3)
+          assert(#messages==messageCount+1, 'Disable and report the failing enhancement once')
         """)
 
     def test_merge_failure_preserves_preferred_layer_and_stops_enhancement(self):

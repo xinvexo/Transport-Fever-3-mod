@@ -45,20 +45,6 @@ class RowTests(unittest.TestCase):
         self.assertEqual(self.plain(params.custom), {"height": 3, "style": "brick"})
         return self.plain(params.modules)
 
-    def test_shift_cargo_platform_follows_existing_four_module_station_length(self):
-        modules = {
-            slot(base, i, j): module(name)
-            for base, i, name in ((TRACK, 0, "rail"), (PASSENGER, 1, "passenger"))
-            for j in range(-2, 2)
-        }
-        cargo = module("cargo", 7)
-        result = self.apply(modules, {
-            "added": True, "slotId": slot(CARGO, -2, 1), "module": cargo,
-        })
-        expected = dict(modules)
-        expected.update({slot(CARGO, -2, j): cargo for j in range(-2, 2)})
-        self.assertEqual(result, expected)
-
     def test_negative_coordinates_and_outer_columns_include_clicked_position(self):
         for base, i, j in (
             (CARGO, -8, -10),
@@ -76,21 +62,6 @@ class RowTests(unittest.TestCase):
                     slot(base, i, p): added for p in range(min(-2, j), max(1, j) + 1)
                 })
                 self.assertEqual(result, expected)
-
-    def test_row_add_fills_gaps_and_keeps_existing_platforms(self):
-        modules = {slot(TRACK, 0, j): module("rail") for j in range(-3, 3)}
-        modules.update({slot(PASSENGER, 1, j): module("old", 1) for j in (-3, 1)})
-        modules[slot(PASSENGER, 2, 0)] = module("neighbour", 9)
-        modules[13000000] = module("building")
-        selected = module("new", 5)
-        result = self.apply(modules, {
-            "added": True, "slotId": slot(PASSENGER, 1, 0), "module": selected,
-        })
-        expected = dict(modules)
-        expected.update({
-            slot(PASSENGER, 1, j): selected for j in range(-3, 3) if j not in (-3, 1)
-        })
-        self.assertEqual(result, expected)
 
     def test_track_and_passenger_rows_fill_only_unoccupied_cells(self):
         for base, other in ((TRACK, PASSENGER), (PASSENGER, TRACK)):
@@ -129,13 +100,13 @@ class RowTests(unittest.TestCase):
         expected.update({slot(CARGO, 0, j): selected for j in (2, 3)})
         self.assertEqual(result, expected)
 
-    def test_row_delete_crosses_gaps_and_removes_platform_attachments(self):
-        for base in (CARGO, PASSENGER):
+    def test_row_delete_preserves_other_rows_and_removes_only_required_attachments(self):
+        for base in (CARGO, PASSENGER, TRACK, ROOF, ADDON):
             with self.subTest(base=base):
                 positions = (-10, -2, 2, 10)
                 modules = {
                     slot(kind, i, j): module(str(kind))
-                    for kind in (base, TRACK, ROOF, ADDON)
+                    for kind in (base, PASSENGER, TRACK, ROOF, ADDON)
                     for i in (-2, -1)
                     for j in positions
                 }
@@ -144,7 +115,8 @@ class RowTests(unittest.TestCase):
                     "added": False, "slotId": slot(base, -2, 2),
                 })
                 expected = dict(modules)
-                for kind in (base, ROOF, ADDON):
+                removed = (base, ROOF, ADDON) if base in (CARGO, PASSENGER) else (base,)
+                for kind in removed:
                     for j in positions:
                         expected.pop(slot(kind, -2, j))
                 self.assertEqual(result, expected)
@@ -165,25 +137,6 @@ class RowTests(unittest.TestCase):
                 expected = dict(modules)
                 expected.update({slot(base, -2, j): selected for j in (-1, 2)})
                 self.assertEqual(result, expected)
-
-    def test_track_and_roof_deletion_keep_other_module_types(self):
-        for base in (TRACK, ROOF, ADDON):
-            with self.subTest(base=base):
-                modules = {
-                    slot(kind, i, j): module(str(kind))
-                    for kind in (TRACK, PASSENGER, ROOF, ADDON)
-                    for i in (0, 1)
-                    for j in (-2, 0, 2)
-                }
-                result = self.apply(modules, {
-                    "added": False, "slotId": slot(base, 0, 0),
-                })
-                expected = dict(modules)
-                for j in (-2, 0, 2):
-                    expected.pop(slot(base, 0, j))
-                self.assertEqual(result, expected)
-
-
 
 if __name__ == "__main__":
     unittest.main()

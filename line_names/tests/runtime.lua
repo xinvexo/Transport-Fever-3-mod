@@ -6,6 +6,7 @@ components[999] = { GAME_TIME = { tickCount = 1, updateCount = 0 } }
 local function entities(kind)
   -- Native world singletons are readable but cannot be globally enumerated.
   assert(kind ~= 'GAME_TIME', 'Cannot loop over this component type')
+  assert(kind ~= 'TOWN_BUILDING', 'Use the native town-to-building map')
   scans[kind] = (scans[kind] or 0) + 1
   local result = {}
   for id, comp in pairs(components) do

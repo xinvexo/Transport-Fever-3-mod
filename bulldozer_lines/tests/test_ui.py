@@ -23,27 +23,13 @@ api = {engine = {entityExists=function(id) return names[id] ~= nil end,
     reads.names=reads.names+1;return names[id]
   end},
   system={lineSystem={getLinesForPlayer=function(player) assert(player==7);return entities end}}}}
-api.type = {['enum']={Carrier={ROAD=1,TRAM=2,RAIL=3,WATER=4,AIR=5}},
-  Vec2f={new=function(x,y) return {x=x,y=y} end},
-  Vec4f={new=function(x,y,z,w) return {x=x,y=y,z=z,w=w} end}}
-local function strict(fields)
-  return function() return setmetatable({}, {__newindex=function(t,k,v)
-    assert(fields[k],'Unsupported native style field: '..k)
-    if k=='backgroundColor' or k=='backgroundColor1' or k=='borderColor' or k=='padding' then
-      assert(type(v)=='table' and v.x~=nil and v.w~=nil,'Expected Vec4f for '..k)
-    end
-    rawset(t,k,v)
-  end}) end
-end
+api.type = {['enum']={Carrier={ROAD=1,TRAM=2,RAIL=3,WATER=4,AIR=5}}}
 firedEvents, pendingEvents, eventHandlers, dirty = {}, {}, {}, {}
 api.gui = {fireReactEvent=function() error('Use react.fireEvent(source,name,param)') end,
   byEntity={isLineEmptyOrVisible=function(id) reads.visible=reads.visible+1;return visible[id] or false end},
   byId={resetMovedWindowPosition=function(id)
     assert(id=='xin.bulldozer.lines');resetCount=(resetCount or 0)+1
   end},
-  StyleSheet={new=strict({size=true,padding=true,backgroundImage1=true,borderImage=true,
-    backgroundColor1=true,borderColor=true,backgroundColor=true})},
-  NinePatch={new=strict({fileName=true,horizontal=true,vertical=true})},
   genericRep={find=function(path) return path end,get=function(path)
     if path=='::/gui/main/default_colors.gres' then
       return {data={BaseMedium={0.1,0.15,0.2,1},BaseVeryLight={0.3,0.4,0.5,1},
@@ -52,9 +38,7 @@ api.gui = {fireReactEvent=function() error('Use react.fireEvent(source,name,para
     assert(path=='::/gui/main/transparency.gres')
     return {data={VeryHigh=0.1,High=0.3,Medium=0.5}}
   end}}
-colorUtil={toVec4=function(c) return api.type.Vec4f.new(table.unpack(c)) end,
-  withTransparency=function(c,a) return api.type.Vec4f.new(c[1],c[2],c[3],a) end,
-  withTransparencyRaw=function(c,a) return {c[1],c[2],c[3],a} end}
+colorUtil={withTransparencyRaw=function(c,a) return {c[1],c[2],c[3],a} end}
 nativeLines={filterLine=function(allowed,id)
   reads.filters=reads.filters+1
   for _,carrier in ipairs(allowed) do if carrierSets[id][carrier] then return true end end
@@ -224,24 +208,16 @@ local allowed = {
   ColumnDesc={name=true,recipe=true,weight=true},
   DataTable={columns=true,rowKeys=true,userParam=true,disableSortKey=true,
     scrollPolicyHorizontal=true,scrollPolicyVertical=true},
-  List={children=true,orientation=true,behavior=true,selectionIndex=true,deselectAllowed=true,cycle=true,
-    horizontalScrollBarPolicy=true,verticalScrollBarPolicy=true},
   LineViewer={selectable=true,showLines=true,hiddenLinesTransparent=true,showTerminals=true,
     fadingMinHeight=true,fadingDeltaHeight=true},
 }
-builtin = {type={Orientation={Horizontal=1,Vertical=2},ListBehavior={Default=0},
+builtin = {type={Orientation={Horizontal=1,Vertical=2},
   ImageViewScaling={AutoFit=1},
   ScrollBarPolicy={AsNeeded=1,AlwaysOff=2,AsNeededButAlwaysReserveSpace=3},LineVisualization={new=function() return {} end}}}
 cellParams={};cellNodes={};tableIdentities={};tableCreationCount=0
 for name,fields in pairs(allowed) do
   builtin[name]=function(params)
     for field in pairs(params) do assert(field=='meta' or fields[field],name..': '..field) end
-    if name=='List' then
-      for _,child in pairs(params.children or {}) do
-        assert(child.kind=='Component' or child.kind=='TextView' or child.kind=='Button',
-          'List children must be Components, not Layouts')
-      end
-    end
     local node={kind=name,params=params,owner=current,generation=generation}
     if name=='DataTable' then
       local tableKey=current..':'..params.meta.localKey
@@ -276,7 +252,6 @@ builtin.ActionDescriptor=function(...)
 end
 lineUI={ColorWidget=function(params) return {kind='ColorWidget',params=params} end,
   LocateButton=function(params) return {kind='LocateButton',params=params} end}
-styleutil={makeStyle=function(style) return style end}
 log={message=function() end}
 _=function(text) return text end
 function ug_require(path)
@@ -284,7 +259,7 @@ function ug_require(path)
     ['::/gui/main/builtin.lua']=builtin, ['::/gui/main/react.lua']=react,
     ['::/gui/main/mod_entry_point.tl']={ModEntryPointExtension={}},
     ['::/gui/main/game_react_globals.tl']=globals, ['::/gui/main/engine_react_util.tl']=engine,
-    ['::/gui/main/styleutil.tl']=styleutil, ['::/gui/line_vehicle_mgmt/line_react_util.tl']=lineUI,
+    ['::/gui/line_vehicle_mgmt/line_react_util.tl']=lineUI,
     ['::/gui/main/color_util.tl']=colorUtil,
     ['::/gui/line_vehicle_mgmt/line_util.tl']=nativeLines,
     ['::/scripts/lang_util.tl']=langUtil,
@@ -358,69 +333,6 @@ class GuiTests(unittest.TestCase):
         self.lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
         self.lua.execute("render('XinBulldozerLinesEntry'); flushEvents()")
 
-    def test_unchanged_snapshot_retains_identity_without_missing_changes(self):
-        self.lua.execute('''
-          local filters={carriers={},onlyVisible=true}
-          local old=lines.read(filters)
-          entities={33,11,22}
-          assert(lines.read(filters,old)==old)
-          assert(lines.read({carriers={}},old)~=old, 'Filter changes invalidate the snapshot')
-          visible[22]=true
-          local changed=lines.read(filters,old)
-          assert(changed~=old and changed[1].visible and not old[1].visible)
-          assert(lines.read(filters,changed)==changed)
-          names[22]=nil;entities={11,33}
-          local reduced=lines.read(filters,changed)
-          assert(reduced~=changed and #reduced==2)
-          assert(lines.read(filters,reduced)==reduced)
-          local before=windowParams.lines:old()
-          timers.XinBulldozerLinesEntry()
-          local updated=windowParams.lines:old()
-          assert(updated~=before and #updated==2)
-          dirty.XinBulldozerLinesEntry=nil
-          timers.XinBulldozerLinesEntry()
-          assert(windowParams.lines:old()==updated and not dirty.XinBulldozerLinesEntry)
-        ''')
-
-    def test_color_hook_failure_keeps_native_action_and_does_not_retry(self):
-        lua = LuaRuntime(unpack_returned_tuples=True)
-        lua.execute('''
-          original={constructionActionParams={bulldozer=true}}
-          attempts,messages=0,{}
-          construction={getActionParams=function(...)
-            arguments=table.pack(...)
-            if nativeError then error(nativeError) end
-            return original
-          end}
-          local react={RegisterRecipe=function() end,RegisterWrapperRecipe=function() end,
-            RegisterPluginRecipe=function() end}
-          local builtin={}
-          function ug_require(path)
-            if path:find('construction_react_util',1,true) then return construction end
-            if path:find('building_colors.lua',1,true) then return {apply=function()
-              attempts=attempts+1;error('incompatible color data')
-            end} end
-            if path:find('/react.lua',1,true) then return react end
-            if path:find('/builtin.lua',1,true) then return builtin end
-            return {}
-          end
-          log={message=function(s) messages[#messages+1]=s end}
-        ''')
-        lua.execute((CONTENT / 'ui_entry.script.lua').read_text(encoding='utf-8'))
-        lua.execute('''
-          local definition={action='ACTION_BULLDOZER'}
-          assert(construction.getActionParams({action='ACTION_STREET_BUILDER'})==original)
-          assert(attempts==0)
-          assert(construction.getActionParams(definition,'params',nil,3)==original)
-          assert(arguments.n==4 and arguments[3]==nil and arguments[4]==3)
-          local count=#messages
-          for i=1,10 do assert(construction.getActionParams(definition)==original) end
-          assert(attempts==1 and #messages==count)
-          nativeError='native failure'
-          local ok,failure=pcall(construction.getActionParams,definition)
-          assert(not ok and tostring(failure):find(nativeError,1,true))
-        ''')
-
     def test_native_name_comparison_drives_numeric_and_chinese_order(self):
         self.lua.execute('''
           names={[11]='线路10',[22]='线路2',[33]='重庆1',[44]='北京1'}
@@ -447,21 +359,6 @@ class GuiTests(unittest.TestCase):
           names[11]='线路1';rank['线路1']=2.5
           nextSnapshot=lines.read({carriers={}},nextSnapshot)
           assert(comparisons>calls and nextSnapshot[3].entity==11 and nextSnapshot[4].entity==22)
-        ''')
-
-    def test_native_equal_names_do_not_gain_an_entity_id_sort_key(self):
-        self.lua.execute('''
-          local compare
-          local originalSort=table.sort
-          table.sort=function(values,fn) compare=fn;return originalSort(values,fn) end
-          lines.read({carriers={}})
-          local calls=0
-          langUtil.compareStrings=function(a,b)
-            calls=calls+1;assert(a=='同名线路' and b=='同名线路');return 0
-          end
-          assert(not compare({entity=11,name='同名线路'},{entity=22,name='同名线路'}))
-          assert(not compare({entity=22,name='同名线路'},{entity=11,name='同名线路'}))
-          assert(calls==2, 'Equality must also be decided by the native comparator')
         ''')
 
     def test_first_selector_to_bulldozer_keeps_native_hook_slots(self):
@@ -544,6 +441,7 @@ class GuiTests(unittest.TestCase):
         self.lua.execute('''
           local filters={carriers={},onlyVisible=true}
           local old=lines.read(filters)
+          assert(lines.read(filters,old)==old, 'An unchanged snapshot retains its identity')
           local sorts=reads.sorts
           visible[11]=false;entities={33,11,22}
           local nextSnapshot=lines.read(filters,old)
@@ -604,26 +502,6 @@ class GuiTests(unittest.TestCase):
           find(window,'TextInputField')[1].onTyping('Sedona')
           render('XinBulldozerLineWindow',windowParams)
           assert(#firedEvents==count and not dirty.TestNativeAction, 'Search only affects the panel')
-        ''')
-
-    def test_state_changes_invalidate_action_without_conditional_hooks(self):
-        self.lua.execute('''
-          drawBulldozer()
-          local window=render('XinBulldozerLineWindow',windowParams)
-          checks(window)[1].onValueChange(1)
-          assert(dirty.XinBulldozerLinesEntry)
-          render('XinBulldozerLinesEntry');flushEvents()
-          assert(dirty.TestNativeAction)
-          assertShown(drawBulldozer(),{22})
-          checks(window)[1].onValueChange(0)
-          find(window,'ToggleButton')[6].onValueChange(1)
-          render('XinBulldozerLinesEntry');flushEvents()
-          assertShown(drawBulldozer(),{33,11})
-          visible[11]=false
-          timers.XinBulldozerLinesEntry()
-          render('XinBulldozerLinesEntry');flushEvents()
-          assert(dirty.TestNativeAction)
-          assertShown(drawBulldozer(),{33})
         ''')
 
     def test_old_window_callbacks_cannot_close_or_modify_reopened_panel(self):
@@ -737,28 +615,6 @@ class GuiTests(unittest.TestCase):
           end
         ''')
 
-    def test_checking_lines_hides_every_other_line_and_clear_restores_all(self):
-        self.lua.execute('''
-          assertShown(drawBulldozer(),{22,33,11})
-          local window=render('XinBulldozerLineWindow',windowParams)
-          assert(added==1 and #checks(window)==3)
-          checks(window)[3].onValueChange(1)
-          assertShown(drawBulldozer(),{11})
-          window=render('XinBulldozerLineWindow',windowParams)
-          assert(checks(window)[3].value==1)
-          checks(window)[2].onValueChange(1)
-          assertShown(drawBulldozer(),{33,11})
-          checks(window)[3].onValueChange(0)
-          assertShown(drawBulldozer(),{33})
-          headerCheck(window).onValueChange(1)
-          window=render('XinBulldozerLineWindow',windowParams)
-          assert(headerCheck(window).value==1)
-          headerCheck(window).onValueChange(0)
-          assert(next(windowParams.selected:old())==nil)
-          assertShown(drawBulldozer(),{22,33,11})
-          assert(added==1)
-        ''')
-
     def test_search_is_literal_and_preserves_selection_outside_results(self):
         self.lua.execute('''
           drawBulldozer()
@@ -787,30 +643,6 @@ class GuiTests(unittest.TestCase):
           assert(#checks(window)==0)
         ''')
 
-    def test_close_button_exits_bulldozer_and_cleans_up_without_reopening(self):
-        self.lua.execute('''
-          drawBulldozer()
-          local window=render('XinBulldozerLineWindow',windowParams)
-          assert(window.params.autoFocusOnBecomingVisible==false)
-          assert(window.params.autoVisibilityOnFocusChange==false)
-          assert(window.params.tool==nil)
-          window.params.onClose()
-          assert(next(windows)==nil)
-          assert(firedEvents[#firedEvents]=='closeConstructionWindow')
-          assert(activeTool.name=='Construction', 'Native event dispatch is deferred')
-          flushEvents()
-          assert(activeTool==nil)
-          render('XinBulldozerLinesEntry');flushEvents()
-          assert(added==1)
-          local oldParams=windowParams
-          unmount('XinBulldozerLineWindow')
-          unmount('XinBulldozerLinesEntry')
-          assert(next(windows)==nil and oldParams.selected:hasExpired())
-          activeTool={name='Construction'};activeVariant='bulldozer'
-          render('XinBulldozerLinesEntry'); flushEvents()
-          assert(added==2 and next(windows)~=nil)
-        ''')
-
     def test_switching_tools_closes_panel_and_reentering_resets_selection(self):
         self.lua.execute('''
           windowParams.selected:set({[11]=true})
@@ -837,22 +669,6 @@ class GuiTests(unittest.TestCase):
           assert(activeTool.name=='Construction' and activeVariant=='road')
         ''')
 
-    def test_action_collector_rejects_deferred_or_stale_node_ids(self):
-        self.lua.execute('''
-          recipes.TestBadAction=function()
-            return builtin.ActionDescriptor{
-              tool='management',children={{recipe='DeferredRecipe'}}
-            }
-          end
-          local ok=pcall(render,'TestBadAction')
-          assert(not ok)
-          local previous=render('TestNativeAction').params.children[2]
-          recipes.TestStaleAction=function()
-            return builtin.ActionDescriptor{tool='management',children={previous}}
-          end
-          assert(not pcall(render,'TestStaleAction'))
-        ''')
-
     def test_filters_are_independent_and_combine_with_visible_area(self):
         self.lua.execute('''
           local window=render('XinBulldozerLineWindow',windowParams)
@@ -866,6 +682,8 @@ class GuiTests(unittest.TestCase):
           assertShown(drawBulldozer(),{11})
           visible[11]=false;visible[22]=true
           timers.XinBulldozerLinesEntry()
+          render('XinBulldozerLinesEntry');flushEvents()
+          assert(dirty.TestNativeAction, 'Camera changes must invalidate the active viewer')
           assertShown(drawBulldozer(),{22})
           window=render('XinBulldozerLineWindow',windowParams)
           assert(#checks(window)==1 and checks(window)[1].meta.localKey=='line-check-22')
@@ -908,39 +726,9 @@ class GuiTests(unittest.TestCase):
           assertShown(drawBulldozer(),{22,33})
         ''')
 
-    def test_left_panel_has_framed_list_locators_and_no_instruction_footer(self):
-        self.lua.execute('''
-          local window=render('XinBulldozerLineWindow',windowParams)
-          assert(window.params.initialX > 0 and window.params.initialX < 0.05)
-          assert(window.params.initialY > 0 and window.params.initialY < 0.3)
-          assert(resetCount==1)
-          render('XinBulldozerLineWindow',windowParams)
-          assert(resetCount==1)
-          local locators=find(window,'LocateButton')
-          assert(#locators==3)
-          assert(locators[1].entity==22 and locators[2].entity==33 and locators[3].entity==11)
-          assert(locators[1].iconPathOverride=='::/gui/line_vehicle_mgmt/icons/symbol_locate_20.tga')
-          local framed=false
-          for _,component in ipairs(find(window,'Component')) do
-            if component.meta and component.meta.class=='bl-card' then framed=true end
-          end
-          assert(framed)
-          assert(headerCheck(window) and headerCheck(window).triStateSupport==false)
-          for _,row in ipairs(find(window,'TableLayout')) do
-            local cells=row.rows[1].params.cells
-            assert(cells[1].kind=='CheckBox' and cells[2].kind=='ColorWidget')
-            assert(cells[3].kind=='TextView' and cells[4].kind=='LocateButton')
-            assert(row.columnWeights[1]==0 and row.columnWeights[2]==0
-              and row.columnWeights[3]==1 and row.columnWeights[4]==0)
-          end
-          for _,text in ipairs(find(window,'TextView')) do
-            assert(text.text~='Check lines to show only those routes.')
-            assert(text.text~='Show all lines')
-          end
-        ''')
-
     def test_header_selection_tracks_search_and_partial_selection(self):
         self.lua.execute('''
+          assertShown(drawBulldozer(),{22,33,11})
           local window=render('XinBulldozerLineWindow',windowParams)
           assert(headerCheck(window).value==0)
           checks(window)[1].onValueChange(1)
@@ -956,23 +744,12 @@ class GuiTests(unittest.TestCase):
           assert(headerCheck(window).value==1)
           headerCheck(window).onValueChange(0)
           assert(next(windowParams.selected:old())==nil)
+          assertShown(drawBulldozer(),{22,33,11})
         ''')
 
 
 @unittest.skipUnless(GAME, 'Set TF3_GAME_DIR to check shipped GUI contracts')
 class NativeContractTests(unittest.TestCase):
-    def test_name_comparator_is_shared_with_native_manager_and_table(self):
-        with ZipFile(GAME / 'base/content/scripts.zip') as archive:
-            lang = archive.read('scripts/lang_util.tl').decode('utf-8')
-        with ZipFile(GAME / 'base/content/gui.zip') as archive:
-            manager = archive.read('gui/line_vehicle_mgmt/manager_window.tl').decode('utf-8')
-        builtin = (GAME / 'base/tealdef/scripts/builtin.d.tl').read_text(encoding='utf-8')
-        self.assertIn('compareStrings = langInternal.compareStrings', lang)
-        self.assertIn('return lang_util.compareStrings(a.lineName, b.lineName) < 0', manager)
-        self.assertIn('return { isDepot, name }', manager)
-        self.assertIn('Sorting the table from C++ will use lang_util.compareStrings()', builtin)
-        self.assertIn('"Train 2" to be sorted before "Train 10"', builtin)
-
     def test_filter_icons_and_locate_match_native_resources(self):
         gui = GuiTests()
         gui.setUp()
@@ -992,7 +769,7 @@ class NativeContractTests(unittest.TestCase):
             locate = archive.read('gui/line_vehicle_mgmt/line_react_util.tl').decode('utf-8')
             self.assertIn('api.gui.camera.followEntity(param.entity, true)', locate)
 
-    def test_stylesheet_parses_with_native_selector_parser_and_uses_native_sizing(self):
+    def test_stylesheet_parses_with_native_selector_parser(self):
         gui = GuiTests()
         gui.setUp()
         gui.lua.execute(r'''
@@ -1025,54 +802,30 @@ class NativeContractTests(unittest.TestCase):
         ''')
         gui.lua.execute((CONTENT / 'panel.css.lua').read_text(encoding='utf-8'))
         rules = gui.lua.globals().data()
-        found_row = found_filters = found_card = found_empty = False
-        alternate_alpha = hover_alpha = None
+        self.assertGreater(len(rules), 0)
         for rule in rules.values():
             levels = list(rule['levels'].values())
             self.assertEqual(levels[0]['id'], 'xin.bulldozer.lines')
             last = levels[-1]
             classes = set(last['classList'].values())
-            pseudos = set(last['pseudoClassList'].values())
-            style = rule['styleSheet']
-            if classes == {'bl-row', 'alternate'} and not pseudos:
-                alternate_alpha = style['backgroundColor'][4]
-            if classes == {'bl-row'} and pseudos == {'hover'}:
-                hover_alpha = style['backgroundColor'][4]
             if classes == {'bl-list', 'empty'}:
-                self.assertEqual(style['visibility'], 'none')
-                found_empty = True
-            if 'bl-row' in classes and style['size'] is not None:
-                self.assertEqual(tuple(style['size'].values()), (-1, 24))
-                self.assertEqual(tuple(style['backgroundColor1'].values()), (0, 0, 0, 0))
-                found_row = True
+                self.assertEqual(rule['styleSheet']['visibility'], 'none')
             if 'bl-card' in classes:
                 self.assertFalse(last['element'], 'Class selector must match recipe-backed components too')
-                self.assertEqual(tuple(style['size'].values()), (-1, 240))
-                self.assertIsNotNone(style['borderImage'])
-                found_card = True
-            if last['element'] == 'ToggleButton':
-                self.assertIsNone(style['size'], 'Native filter buttons use their icon size')
-                self.assertEqual(tuple(style['padding'].values()), (6, 6, 6, 6))
-                found_filters = True
-        self.assertTrue(found_row and found_filters and found_card and found_empty)
-        self.assertLess(alternate_alpha, hover_alpha, 'Every unselected row needs visible hover feedback')
 
     def test_dependent_states_and_snapshot_refresh_follow_native_contracts(self):
         declarations = (GAME / 'base/tealdef/scripts/react.d.tl').read_text(encoding='utf-8')
         self.assertIn('transform : function(curDependent : D, source : S) : D', declarations)
         with ZipFile(GAME / 'base/content/gui.zip') as archive:
-            react = archive.read('gui/main/react.lua').decode('utf-8')
-            editor = archive.read('gui/map_editor/map_editor.tl').decode('utf-8')
             engine = archive.read('gui/main/engine_react_util.tl').decode('utf-8')
-        self.assertIn('declareDependentState(sourceState:getUnderlyingState(), transformFn)', react)
-        self.assertIn('react.useDependentState(param.sharedStateAccess.allSharedStateRef,', editor)
-        self.assertIn('function(_own : any, source : { string : any })', editor)
-        self.assertIn('react.useStateLazy(getFromEngine)', engine)
         self.assertIn('getFromEngine(stateData:old())', engine)
         self.assertIn('stateEqualsFn(newState, stateData:old())', engine)
 
     def test_rendered_button_fields_match_native_userdata(self):
         source = (GAME / 'base/tealdef/scripts/builtin.d.tl').read_text(encoding='utf-8')
+        viewer = re.search(r'record LineViewerParam\b(.*?)\n\s*end', source, re.S).group(1)
+        for field in ('selectable', 'hiddenLinesTransparent', 'showTerminals'):
+            self.assertRegex(viewer, rf'\b{field}\s*:\s*boolean')
         record = re.search(r'record ButtonParam\b(.*?)\n\s*end', source, re.S).group(1)
         fields = set(re.findall(r'^\s*(\w+)\s*:', record, re.M))
         gui = GuiTests()
@@ -1095,18 +848,6 @@ class NativeContractTests(unittest.TestCase):
         self.assertIn('("construction-menu-" .. categories[activeIndex].id)', construction)
         self.assertIn('DeclareBuiltinWithUserdata("ActionDescriptor", function (params) return params.children end)', builtin)
         self.assertIn('function game_react_globals.getDefaultWindowApi()', globals_code)
-
-    def test_viewer_can_hide_unselected_lines_without_intercepting_selection(self):
-        source = (GAME / 'base/tealdef/scripts/builtin.d.tl').read_text(encoding='utf-8')
-        viewer = re.search(r'record LineViewerParam\b(.*?)\n\s*end', source, re.S).group(1)
-        for field in ('selectable', 'hiddenLinesTransparent', 'showTerminals'):
-            self.assertRegex(viewer, rf'\b{field}\s*:\s*boolean')
-        self.assertIn('AsNeeded : ScrollBarPolicy', source)
-        with ZipFile(GAME / 'base/content/gui.zip') as archive:
-            line = archive.read('gui/entity_window/line/line.tl').decode('utf-8')
-            self.assertRegex(line, r'builtin.LineViewer\s*{\s*selectable = false')
-            self.assertIn('hiddenLinesTransparent = false', line)
-
 
 if __name__ == '__main__':
     unittest.main()

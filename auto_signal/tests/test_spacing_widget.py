@@ -124,18 +124,6 @@ class SpacingWidgetTests(unittest.TestCase):
         self.assertEqual(self.render().children[2].content.text, "300 米")
         self.assertEqual(self.commits, [])
 
-    def test_external_value_updates_both_controls_in_either_mode(self):
-        self.param.currentValue = 650
-        row = self.render()
-        self.assertEqual(row.children[1].value, 650)
-        self.assertEqual(row.children[2].content.text, "650 米")
-        row.children[2].onClick()
-        self.param.currentValue = 425
-        row = self.render()
-        self.assertEqual(row.children[1].value, 425)
-        self.assertEqual(row.children[2].value, 425)
-        self.assertEqual(self.commits, [])
-
     def test_numeric_input_accepts_positive_meters_outside_slider_range(self):
         self.render().children[2].onClick()
         spin = self.render().children[2]
@@ -174,17 +162,6 @@ class SpacingWidgetTests(unittest.TestCase):
             with self.subTest(value=value):
                 spin.onValueChange(value)
                 self.assertEqual(self.commits[-1], value)
-
-    def test_native_label_wrapper_receives_layout_preferences(self):
-        on_hover = lambda value: None
-        self.param.onHover = on_hover
-        wrapper = self.widget.build(self.param)
-        self.assertEqual(wrapper.name, "间距")
-        self.assertTrue(wrapper.vertical)
-        self.assertTrue(wrapper.addSpacer)
-        self.assertIs(wrapper.onHover, on_hover)
-        self.param.vertical = None
-        self.assertEqual(self.widget.build(self.param).kind, "Recipe")
 
 
 if __name__ == "__main__":

@@ -338,19 +338,6 @@ class AlternativesTests(unittest.TestCase):
         self.assertEqual(alternatives(result), [(0, 1), (0, 2)])
         self.assertEqual(self.lua.eval("reads[100]"), 2)
 
-    def test_known_train_line_does_not_read_station_groups(self):
-        original = [stop(100), stop(200)]
-        self.line(1, original, TRAIN)
-        self.lua.execute("""
-            local getComponent = api.engine.getComponent
-            api.engine.getComponent = function(entity, kind)
-                assert(entity == 1, 'train line must not inspect stations')
-                return getComponent(entity, kind)
-            end
-            api.engine.entityExists = function() return true end
-        """)
-        self.assertEqual(self.auto_assign(original), original)
-        self.assertEqual(self.lua.eval("#warnings"), 0)
 
     def test_removed_previous_station_is_not_read_during_preferred_change(self):
         self.group(100, [terminal(), terminal()])

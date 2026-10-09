@@ -1,7 +1,6 @@
 """Check the native zoning-color pipeline without running the game renderer."""
 import os
 from pathlib import Path
-import re
 import unittest
 from zipfile import ZipFile
 
@@ -99,6 +98,7 @@ class BuildingColorTests(unittest.TestCase):
         self.lua.execute('''
           calls=0
           construction={getActionParams=function(...)
+            if nativeError then error(nativeError) end
             calls=calls+1;assert(select('#',...)==8)
             local definition,params,repository,gamepad,ref,entity,callback,sublist=...
             assert(params=='params' and repository=='repo' and gamepad==false)
@@ -144,6 +144,9 @@ class BuildingColorTests(unittest.TestCase):
           assert(layer.colorPassFn.fallbackColor.underground and layer.colorPassFn.transportNetworkPainter.keep)
           assert(layer.colorPassFn.townBuildingPainter==nil)
           assert(not layer.buildingRenderableConfig.isVisible and layer.buildingRenderableConfig.includeStations)
+          nativeError='native action failure'
+          local ok,failure=pcall(construction.getActionParams,{action='ACTION_BULLDOZER'})
+          assert(not ok and tostring(failure):find(nativeError,1,true))
         ''')
 
 

@@ -37,7 +37,7 @@ end
 
 local function build(towns, streets)
   local types = api.type.ComponentType
-  local entries, planned, aliases, townNames = {}, {}, {}, {}
+  local entries, planned, townNames = {}, {}, {}
   local entities, ownName = names.entities, names.ownName
   local function add(entity, name, includeDisplayed, nativeTown, nativeTownName, nativeOwner)
     if not names.hasName(entity) then return end
@@ -69,7 +69,6 @@ local function build(towns, streets)
       name = nextTown()
       add(entity, name, true)
     end
-    if old then aliases[old] = name end
     townNames[entity] = name or api.engine.util.getEntityName(entity)
   end
 
@@ -85,9 +84,6 @@ local function build(towns, streets)
     if names.needsChineseName(old) and names.hasName(entity) then
       byStreetName[old] = byStreetName[old] or nextStreet()
       add(entity, byStreetName[old], true)
-      aliases[old] = aliases[old] or byStreetName[old]
-    elseif old then
-      aliases[old] = aliases[old] or old
     end
   end
 
@@ -100,7 +96,7 @@ local function build(towns, streets)
     end
   end
 
-  facilities.plan(aliases, townNames, add)
+  facilities.plan(townNames, add)
   -- Existing default numbered line/vehicle titles can be baked into a map.
   -- Branded vehicle models and custom company/line titles are not region names.
   for __, spec in ipairs({ {types.LINE, "Line", "lineNumber"},

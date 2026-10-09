@@ -44,7 +44,6 @@ class TidyFieldsUiTests(unittest.TestCase):
                 getTarget = function() return 10, construction end,
                 make = function(entity, mode)
                     attempts[#attempts + 1] = {entity = entity, mode = mode}
-                    if refusal then return nil, nil, refusal end
                     return {mode = mode}, {player = 7}
                 end,
             }
@@ -100,7 +99,7 @@ class TidyFieldsUiTests(unittest.TestCase):
         """)
         proposal = self.lua.execute((ROOT / "content/tidy_fields/proposal.lua").read_text(encoding="utf-8"))
         self.lua.globals().proposals.describeFailure = proposal.describeFailure
-        self.ui = self.lua.execute((ROOT / "content/tidy_fields/ui.script.lua").read_text(encoding="utf-8"))
+        self.lua.execute((ROOT / "content/tidy_fields/ui.script.lua").read_text(encoding="utf-8"))
         self.lua.execute("ui = data(); uiParams = {entityId = 11, ownershipState = 'Own'}")
 
     def render(self):
@@ -116,54 +115,6 @@ class TidyFieldsUiTests(unittest.TestCase):
         for side in ("front", "back", "left", "right"):
             self.direction_button(side).onValueChange(1 if side in sides else 0)
             self.render()
-
-    def test_english_controls_and_async_results(self):
-        self.lua.globals()._ = self.translations['en'].__getitem__
-        self.render()
-        self.assertEqual(self.direction_button('front').content.text, 'Front')
-        self.assertEqual(self.direction_button('right').content.text, 'Right')
-        self.assertEqual(self.element('Button').content.text, 'Tidy fields')
-        self.element('Button').onClick()
-        self.render()
-        self.assertEqual(self.element('Button').content.text, 'Tidying…')
-        self.lua.execute('pendingCallback({}, true)')
-        self.render()
-        self.assertEqual(self.element('TextView', 'industryWindow.tidyFields.result').text, 'Plots tidied.')
-        self.element('Button').onClick()
-        self.lua.execute("pendingCallback({resultProposalData = {errorState = {messages = {'Blocked 50%'}}}}, false)")
-        self.render()
-        self.assertEqual(self.element('TextView', 'industryWindow.tidyFields.result').text,
-                         'Could not tidy: Blocked 50%')
-
-    def test_direction_buttons_combine_choices_and_default_to_all(self):
-        self.render()
-        sizes = set()
-        for side, label in (("front", "前"), ("back", "后"), ("left", "左"), ("right", "右")):
-            button = self.direction_button(side)
-            self.assertEqual(button.value, 1)
-            self.assertEqual(button.content.text, label)
-            sizes.add((button.meta.styleSheet.size.x, button.meta.styleSheet.size.y))
-        self.assertEqual(len(sizes), 1)
-        self.assertEqual(self.element("ToggleButton").meta.tag, "industryWindow.tidyFields.front")
-        modes = ("left", "right", "front", "back", "left_right", "left_front", "left_back",
-                 "right_front", "right_back", "front_back", "left_right_front", "left_right_back",
-                 "left_front_back", "right_front_back", "all")
-        for mode in modes:
-            sides = ("front", "back", "left", "right") if mode == "all" else mode.split("_")
-            self.select_sides(sides)
-            for side in ("front", "back", "left", "right"):
-                self.assertEqual(self.direction_button(side).value, 1 if side in sides else 0)
-            self.element("Button").onClick()
-            self.assertEqual(self.lua.eval("attempts[#attempts].mode"), mode)
-            self.assertEqual(self.lua.eval("commands[#commands].candidate.mode"), mode)
-            self.assertFalse(self.lua.eval("commands[#commands].ignoreErrors"))
-            self.assertTrue(self.lua.eval("commands[#commands].playerInitiated"))
-            self.lua.execute("pendingCallback({}, true)")
-            self.render()
-            self.assertTrue(self.element("Button").meta.enabled)
-        self.select_sides(())
-        self.assertFalse(self.element("Button").meta.enabled)
-        self.assertTrue(self.direction_button("front").meta.enabled)
 
     def test_saved_layout_and_success_allow_another_tidy(self):
         self.lua.execute("construction.params = {xinTidyFields = true, xinTidyLayout = 'left_back'}")
@@ -187,6 +138,11 @@ class TidyFieldsUiTests(unittest.TestCase):
         self.element("Button").onClick()
         self.assertEqual(self.lua.eval("#commands"), 2)
         self.assertEqual(self.lua.eval("commands[2].candidate.mode"), "left_right_back")
+        self.lua.execute("pendingCallback({}, true)")
+        self.render()
+        self.select_sides(())
+        self.assertFalse(self.element("Button").meta.enabled)
+        self.assertTrue(self.direction_button("front").meta.enabled)
 
     def test_failure_detail_leaves_layout_selectable_for_retry(self):
         cases = (

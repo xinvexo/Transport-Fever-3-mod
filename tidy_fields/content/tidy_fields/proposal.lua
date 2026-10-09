@@ -3,21 +3,21 @@ local layout = ug_require "xin_tidy_fields_1::/tidy_fields/layout.lua"
 local proposal = {}
 
 proposal.layouts = {
-  { value = "left", label = "左边" },
-  { value = "right", label = "右边" },
-  { value = "front", label = "前边" },
-  { value = "back", label = "后边" },
-  { value = "left_right", label = "左右" },
-  { value = "left_front", label = "左前" },
-  { value = "left_back", label = "左后" },
-  { value = "right_front", label = "右前" },
-  { value = "right_back", label = "右后" },
-  { value = "front_back", label = "前后" },
-  { value = "left_right_front", label = "左、右、前" },
-  { value = "left_right_back", label = "左、右、后" },
-  { value = "left_front_back", label = "左、前、后" },
-  { value = "right_front_back", label = "右、前、后" },
-  { value = "all", label = "全部" },
+  { value = "left" },
+  { value = "right" },
+  { value = "front" },
+  { value = "back" },
+  { value = "left_right" },
+  { value = "left_front" },
+  { value = "left_back" },
+  { value = "right_front" },
+  { value = "right_back" },
+  { value = "front_back" },
+  { value = "left_right_front" },
+  { value = "left_right_back" },
+  { value = "left_front_back" },
+  { value = "right_front_back" },
+  { value = "all" },
 }
 
 local supported = {

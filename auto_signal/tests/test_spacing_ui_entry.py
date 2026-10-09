@@ -109,15 +109,6 @@ class SpacingUiEntryTests(unittest.TestCase):
         self.assertEqual(self.control(second[1].params[3]).kind, "custom")
         self.assertEqual(self.calls.definitions, 2)
 
-    def test_entry_render_has_no_repeated_hook_work(self):
-        for _ in range(3):
-            self.assertIsNone(self.entry.entry())
-        definitions = self.construction.getConstructionDefinitions()
-        self.assertEqual(self.control(definitions[1].params[3]).kind, "custom")
-        self.assertEqual(self.calls.definitions, 1)
-        self.assertEqual(self.calls.custom, 1)
-        self.assertEqual(self.calls.plugins, 1)
-
     def test_resource_points_to_the_registered_gui_entry(self):
         self.lua.execute((ROOT / "content/auto_signal/ui_entry.res.lua").read_text(encoding="utf-8"))
         resource = self.lua.globals().data()

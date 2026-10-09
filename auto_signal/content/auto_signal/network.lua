@@ -31,7 +31,6 @@ local function nodeTracks(node, cache)
 end
 
 local function edgeTransport(entity, cache)
-  if not cache then return component(entity, "TRANSPORT_NETWORK") end
   if cache.transport[entity] == nil then
     cache.transport[entity] = component(entity, "TRANSPORT_NETWORK") or false
   end
